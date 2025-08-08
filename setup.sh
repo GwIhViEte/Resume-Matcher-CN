@@ -60,7 +60,7 @@ info "检测到操作系统: $OS_TYPE"
 
 #–– 1. 检查前置条件 ––#
 check_cmd() {
-  local cmd=\$1
+  local cmd=$1
   if ! command -v "$cmd" &> /dev/null; then
     error "未安装命令: $cmd ，请安装后重试。"
   fi
