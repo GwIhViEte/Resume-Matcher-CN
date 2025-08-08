@@ -2,6 +2,10 @@
   "version": 2,
   "builds": [
     {
+      "src": "next.config.ts",
+      "use": "@vercel/next"
+    },
+    {
       "src": "../backend/app/main.py",
       "use": "@vercel/python"
     }
@@ -9,7 +13,11 @@
   "rewrites": [
     {
       "source": "/api_be/:path*",
-      "destination": "../backend/app/main.py"
+      "destination": "/../backend/app/main.py"
+    },
+    {
+      "source": "/:path*",
+      "destination": "/:path*"
     }
   ]
 }
