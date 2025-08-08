@@ -2,22 +2,19 @@
   "version": 2,
   "builds": [
     {
-      "src": "next.config.ts",
-      "use": "@vercel/next"
+      "src": "apps/frontend/next.config.ts",
+      "use": "@vercel/next",
+      "config": { "workPath": "apps/frontend" }
     },
     {
-      "src": "../backend/app/main.py",
+      "src": "apps/backend/app/main.py",
       "use": "@vercel/python"
     }
   ],
   "rewrites": [
     {
       "source": "/api_be/:path*",
-      "destination": "/../backend/app/main.py"
-    },
-    {
-      "source": "/:path*",
-      "destination": "/:path*"
+      "destination": "/apps/backend/app/main.py"
     }
   ]
 }
