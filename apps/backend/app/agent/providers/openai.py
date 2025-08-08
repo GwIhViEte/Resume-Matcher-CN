@@ -20,34 +20,36 @@ class OpenAIProvider(Provider):
         api_key = api_key or settings.LLM_API_KEY or os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise ProviderError("OpenAI API key is missing")
-        self._client = OpenAI(api_key=api_key)
+        # Use the base_url from settings
+        self._client = OpenAI(api_key=api_key, base_url=settings.LLM_BASE_URL, timeout=120.0)
         self.model = model_name
         self.opts = opts
         self.instructions = ""
 
     def _generate_sync(self, prompt: str, options: Dict[str, Any]) -> str:
         try:
-            response = self._client.responses.create(
+            # Note: The original code used a non-existent method `self._client.responses.create`.
+            # The correct method for chat completions is `self._client.chat.completions.create`.
+            # We also need to format the prompt correctly.
+            response = self._client.chat.completions.create(
                 model=self.model,
-                instructions=self.instructions,
-                input=prompt,
+                messages=[
+                    {"role": "system", "content": self.instructions or "You are a helpful assistant."},
+                    {"role": "user", "content": prompt}
+                ],
                 **options,
             )
-            return response.output_text
+            return response.choices[0].message.content
         except Exception as e:
             raise ProviderError(f"OpenAI - error generating response: {e}") from e
 
     async def __call__(self, prompt: str, **generation_args: Any) -> str:
-        if generation_args:
-            logger.warning(f"OpenAIProvider - generation_args not used {generation_args}")
         myopts = {
             "temperature": self.opts.get("temperature", 0),
             "top_p": self.opts.get("top_p", 0.9),
-# top_k not currently supported by any OpenAI model - https://community.openai.com/t/does-openai-have-a-top-k-parameter/612410
-#            "top_k": generation_args.get("top_k", 40),
-# neither max_tokens
-#            "max_tokens": generation_args.get("max_length", 20000),
         }
+        # Combine any extra args, but local opts take precedence
+        myopts.update(generation_args)
         return await run_in_threadpool(self._generate_sync, prompt, myopts)
 
 
@@ -60,13 +62,16 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         api_key = api_key or settings.EMBEDDING_API_KEY or os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise ProviderError("OpenAI API key is missing")
-        self._client = OpenAI(api_key=api_key)
+        # Use the base_url from settings
+        self._client = OpenAI(api_key=api_key, base_url=settings.EMBEDDING_BASE_URL, timeout=120.0)
         self._model = embedding_model
 
     async def embed(self, text: str) -> list[float]:
         try:
+            # The input text should be cleaned of newlines for embedding
+            text_to_embed = text.replace("\n", " ")
             response = await run_in_threadpool(
-                self._client.embeddings.create, input=text, model=self._model
+                self._client.embeddings.create, input=[text_to_embed], model=self._model
             )
             return response.data[0].embedding
         except Exception as e:

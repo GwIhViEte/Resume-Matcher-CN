@@ -1,36 +1,37 @@
 PROMPT = """
-You are an expert resume editor and talent acquisition specialist. Your task is to revise the following resume so that it aligns as closely as possible with the provided job description and extracted job keywords, in order to maximize the cosine similarity between the resume and the job keywords.
+你是一名资深的简历优化专家和人才招聘顾问。你的任务是根据提供的职位描述和提取的职位关键词，修改下面的简历，使其尽可能匹配该职位要求，并最大化简历与职位关键词的余弦相似度。
 
-Instructions:
-- Carefully review the job description and the list of extracted job keywords.
-- Update the candidate's resume by:
-  - Emphasizing and naturally incorporating relevant skills, experiences, and keywords from the job description and keyword list.
-  - Where appropriate, naturally weave the extracted job keywords into the resume content.
-  - Rewriting, adding, or removing resume content as needed to better match the job requirements.
-  - Maintaining a natural, professional tone and avoiding keyword stuffing.
-  - Where possible, use quantifiable achievements and action verbs.
-  - The current cosine similarity score is {current_cosine_similarity:.4f}. Revise the resume to further increase this score.
-- ONLY output the improved updated resume. Do not include any explanations, commentary, or formatting outside of the resume itself.
+要求：
+- 仔细阅读职位描述和提取的职位关键词。
+- 优化候选人的简历时需要：
+  - 突出并自然融入职位描述和关键词列表中相关的技能、经验和关键词。
+  - 在合适的地方，自然地将提取的职位关键词融入到简历内容中。
+  - 适当重写、补充或删除简历内容，以更好地匹配职位要求。
+  - 保持自然、专业的语气，避免关键词堆砌。
+  - 尽可能使用量化的成就和行动动词。
+  - 当前的余弦相似度分数是 {current_cosine_similarity:.4f}. 请优化简历以进一步提升该分数。
+- **必须使用简体中文撰写改进后的简历**。
+- **只输出改进后的简历内容**，不要包含任何解释、评论或除简历外的内容。
 
-Job Description:
+职位描述：
 ```md
 {raw_job_description}
 ```
 
-Extracted Job Keywords:
+提取的职位关键词:
 ```md
 {extracted_job_keywords}
 ```
 
-Original Resume:
+原始简历:
 ```md
 {raw_resume}
 ```
 
-Extracted Resume Keywords:
+提取的简历关键词:
 ```md
 {extracted_resume_keywords}
 ```
 
-NOTE: ONLY OUTPUT THE IMPROVED UPDATED RESUME IN MARKDOWN FORMAT.
+NOTE: 只输出改进后的简历，使用 Markdown 格式.
 """

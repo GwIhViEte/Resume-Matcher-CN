@@ -3,12 +3,13 @@ import uuid
 import json
 import tempfile
 import logging
+import pdfplumber
+import docx
+from typing import Dict, Optional
 
-from markitdown import MarkItDown
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from pydantic import ValidationError
-from typing import Dict, Optional
 
 from app.models import Resume, ProcessedResume
 from app.agent import AgentManager
@@ -23,75 +24,106 @@ logger = logging.getLogger(__name__)
 class ResumeService:
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.md = MarkItDown(enable_plugins=False)
         self.json_agent_manager = AgentManager()
+
+    def _extract_text_from_pdf(self, file_path: str) -> str:
+        """Extracts text from a PDF file."""
+        try:
+            with pdfplumber.open(file_path) as pdf:
+                text_parts = []
+                for page in pdf.pages:
+                    text = page.extract_text()
+                    if text:
+                        text_parts.append(text)
+                return "\n".join(text_parts)
+        except Exception as e:
+            logger.error(f"PDF extraction failed: {str(e)}")
+            raise ResumeValidationError(message=f"PDF文件解析失败: {str(e)}")
+
+    def _extract_text_from_docx(self, file_path: str) -> str:
+        """Extracts text from a DOCX file."""
+        try:
+            doc = docx.Document(file_path)
+            return "\n".join(para.text for para in doc.paragraphs if para.text.strip())
+        except Exception as e:
+            logger.error(f"DOCX extraction failed: {str(e)}")
+            raise ResumeValidationError(message=f"Word文档解析失败: {str(e)}")
 
     async def convert_and_store_resume(
         self, file_bytes: bytes, file_type: str, filename: str, content_type: str = "md"
     ):
         """
-        Converts resume file (PDF/DOCX) to text using MarkItDown and stores it in the database.
-
-        Args:
-            file_bytes: Raw bytes of the uploaded file
-            file_type: MIME type of the file ("application/pdf" or "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-            filename: Original filename
-            content_type: Output format ("md" for markdown or "html")
-
-        Returns:
-            None
+        Converts resume file (PDF/DOCX) to text and stores it in the database.
         """
-        with tempfile.NamedTemporaryFile(
-            delete=False, suffix=self._get_file_extension(file_type)
-        ) as temp_file:
+        file_extension = self._get_file_extension(file_type)
+        
+        # 创建临时文件
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
             temp_file.write(file_bytes)
             temp_path = temp_file.name
 
         try:
-            result = self.md.convert(temp_path)
-            text_content = result.text_content
-            resume_id = await self._store_resume_in_db(text_content, content_type)
+            # 提取文本内容
+            if file_extension == ".pdf":
+                text_content = self._extract_text_from_pdf(temp_path)
+            elif file_extension == ".docx":
+                text_content = self._extract_text_from_docx(temp_path)
+            else:
+                raise ValueError(f"不支持的文件类型: {file_type}")
 
-            await self._extract_and_store_structured_resume(
-                resume_id=resume_id, resume_text=text_content
-            )
+            if not text_content or not text_content.strip():
+                raise ResumeValidationError(
+                    message="无法从文档中提取文本。请确保文件包含文本内容而非图片。"
+                )
 
-            return resume_id
+            # 使用事务处理数据库操作
+            try:
+                resume_id = await self._store_resume_in_db(text_content, content_type)
+                await self._extract_and_store_structured_resume(
+                    resume_id=resume_id, resume_text=text_content
+                )
+                await self.db.commit()
+                return resume_id
+            except Exception as e:
+                await self.db.rollback()
+                raise
+                
         finally:
+            # 清理临时文件
             if os.path.exists(temp_path):
-                os.remove(temp_path)
+                try:
+                    os.remove(temp_path)
+                except Exception as e:
+                    logger.warning(f"Failed to remove temp file: {str(e)}")
 
     def _get_file_extension(self, file_type: str) -> str:
         """Returns the appropriate file extension based on MIME type"""
-        if file_type == "application/pdf":
-            return ".pdf"
-        elif (
-            file_type
-            == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        ):
-            return ".docx"
-        return ""
+        mime_to_ext = {
+            "application/pdf": ".pdf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx"
+        }
+        return mime_to_ext.get(file_type, "")
 
-    async def _store_resume_in_db(self, text_content: str, content_type: str):
+    async def _store_resume_in_db(self, text_content: str, content_type: str) -> str:
         """
         Stores the parsed resume content in the database.
         """
         resume_id = str(uuid.uuid4())
         resume = Resume(
-            resume_id=resume_id, content=text_content, content_type=content_type
+            resume_id=resume_id, 
+            content=text_content, 
+            content_type=content_type
         )
 
         self.db.add(resume)
-        await self.db.flush()
-        await self.db.commit()
-
+        await self.db.flush()  # 不在这里 commit，让外层控制事务
         return resume_id
 
     async def _extract_and_store_structured_resume(
-        self, resume_id, resume_text: str
+        self, resume_id: str, resume_text: str
     ) -> None:
         """
-        extract and store structured resume data in the database
+        Extract and store structured resume data in the database
         """
         try:
             structured_resume = await self._extract_structured_json(resume_text)
@@ -99,66 +131,57 @@ class ResumeService:
                 logger.error("Structured resume extraction returned None.")
                 raise ResumeValidationError(
                     resume_id=resume_id,
-                    message="Failed to extract structured data from resume. Please ensure your resume contains all required sections.",
+                    message="无法从简历中提取结构化数据。请确保简历包含必要的信息。",
                 )
+
+            # 优化 JSON 字段处理
+            def safe_json_dumps(data: any, key: str = None) -> Optional[str]:
+                """安全地将数据转换为 JSON 字符串"""
+                if data is None:
+                    return None
+                if key:
+                    return json.dumps({key: data})
+                return json.dumps(data)
 
             processed_resume = ProcessedResume(
                 resume_id=resume_id,
-                personal_data=json.dumps(structured_resume.get("personal_data", {}))
-                if structured_resume.get("personal_data")
-                else None,
-                experiences=json.dumps(
-                    {"experiences": structured_resume.get("experiences", [])}
-                )
-                if structured_resume.get("experiences")
-                else None,
-                projects=json.dumps({"projects": structured_resume.get("projects", [])})
-                if structured_resume.get("projects")
-                else None,
-                skills=json.dumps({"skills": structured_resume.get("skills", [])})
-                if structured_resume.get("skills")
-                else None,
-                research_work=json.dumps(
-                    {"research_work": structured_resume.get("research_work", [])}
-                )
-                if structured_resume.get("research_work")
-                else None,
-                achievements=json.dumps(
-                    {"achievements": structured_resume.get("achievements", [])}
-                )
-                if structured_resume.get("achievements")
-                else None,
-                education=json.dumps(
-                    {"education": structured_resume.get("education", [])}
-                )
-                if structured_resume.get("education")
-                else None,
-                extracted_keywords=json.dumps(
-                    {
-                        "extracted_keywords": structured_resume.get(
-                            "extracted_keywords", []
-                        )
-                    }
-                    if structured_resume.get("extracted_keywords")
-                    else None
+                personal_data=safe_json_dumps(structured_resume.get("personal_data")),
+                experiences=safe_json_dumps(
+                    structured_resume.get("experiences", []), "experiences"
+                ),
+                projects=safe_json_dumps(
+                    structured_resume.get("projects", []), "projects"
+                ),
+                skills=safe_json_dumps(
+                    structured_resume.get("skills", []), "skills"
+                ),
+                research_work=safe_json_dumps(
+                    structured_resume.get("research_work", []), "research_work"
+                ),
+                achievements=safe_json_dumps(
+                    structured_resume.get("achievements", []), "achievements"
+                ),
+                education=safe_json_dumps(
+                    structured_resume.get("education", []), "education"
+                ),
+                extracted_keywords=safe_json_dumps(
+                    structured_resume.get("extracted_keywords", []), "extracted_keywords"
                 ),
             )
 
             self.db.add(processed_resume)
-            await self.db.commit()
+            await self.db.flush()  # 不在这里 commit
+            
         except ResumeValidationError:
-            # Re-raise validation errors to propagate to the upload endpoint
             raise
         except Exception as e:
             logger.error(f"Error storing structured resume: {str(e)}")
             raise ResumeValidationError(
                 resume_id=resume_id,
-                message=f"Failed to store structured resume data: {str(e)}",
+                message=f"存储结构化简历数据失败: {str(e)}",
             )
 
-    async def _extract_structured_json(
-        self, resume_text: str
-    ) -> StructuredResumeModel | None:
+    async def _extract_structured_json(self, resume_text: str) -> Optional[Dict]:
         """
         Uses the AgentManager+JSONWrapper to ask the LLM to
         return the data in exact JSON schema we need.
@@ -168,42 +191,31 @@ class ResumeService:
             json.dumps(json_schema_factory.get("structured_resume"), indent=2),
             resume_text,
         )
-        logger.info(f"Structured Resume Prompt: {prompt}")
+        logger.debug(f"Structured Resume Prompt: {prompt[:500]}...")  # 只记录部分内容
+        
         raw_output = await self.json_agent_manager.run(prompt=prompt)
 
         try:
-            structured_resume: StructuredResumeModel = (
-                StructuredResumeModel.model_validate(raw_output)
-            )
+            structured_resume = StructuredResumeModel.model_validate(raw_output)
+            return structured_resume.model_dump()
         except ValidationError as e:
-            logger.info(f"Validation error: {e}")
+            logger.error(f"Validation error: {e}")
             error_details = []
             for error in e.errors():
                 field = " -> ".join(str(loc) for loc in error["loc"])
                 error_details.append(f"{field}: {error['msg']}")
 
-            user_friendly_message = "Resume validation failed. " + "; ".join(
-                error_details
-            )
+            user_friendly_message = "简历验证失败: " + "; ".join(error_details)
             raise ResumeValidationError(
                 validation_error=user_friendly_message,
-                message=f"Resume structure validation failed: {user_friendly_message}",
+                message=user_friendly_message,
             )
-        return structured_resume.model_dump()
 
     async def get_resume_with_processed_data(self, resume_id: str) -> Optional[Dict]:
         """
         Fetches both resume and processed resume data from the database and combines them.
-
-        Args:
-            resume_id: The ID of the resume to retrieve
-
-        Returns:
-            Combined data from both resume and processed_resume models
-
-        Raises:
-            ResumeNotFoundError: If the resume is not found
         """
+        # 使用单个查询获取关联数据（如果模型支持关系）
         resume_query = select(Resume).where(Resume.resume_id == resume_id)
         resume_result = await self.db.execute(resume_query)
         resume = resume_result.scalars().first()
@@ -223,47 +235,35 @@ class ResumeService:
                 "id": resume.id,
                 "content": resume.content,
                 "content_type": resume.content_type,
-                "created_at": resume.created_at.isoformat()
-                if resume.created_at
-                else None,
+                "created_at": resume.created_at.isoformat() if resume.created_at else None,
             },
             "processed_resume": None,
         }
 
         if processed_resume:
+            # 优化 JSON 解析
+            def safe_json_loads(data: str, key: str = None) -> any:
+                """安全地解析 JSON 字符串"""
+                if not data:
+                    return [] if key else None
+                try:
+                    parsed = json.loads(data)
+                    return parsed.get(key, []) if key else parsed
+                except json.JSONDecodeError:
+                    logger.error(f"Failed to parse JSON for {key}: {data[:100]}...")
+                    return [] if key else None
+
             combined_data["processed_resume"] = {
-                "personal_data": json.loads(processed_resume.personal_data)
-                if processed_resume.personal_data
-                else None,
-                "experiences": json.loads(processed_resume.experiences).get(
-                    "experiences", []
-                )
-                if processed_resume.experiences
-                else None,
-                "projects": json.loads(processed_resume.projects).get("projects", [])
-                if processed_resume.projects
-                else [],
-                "skills": json.loads(processed_resume.skills).get("skills", [])
-                if processed_resume.skills
-                else [],
-                "research_work": json.loads(processed_resume.research_work).get(
-                    "research_work", []
-                )
-                if processed_resume.research_work
-                else [],
-                "achievements": json.loads(processed_resume.achievements).get(
-                    "achievements", []
-                )
-                if processed_resume.achievements
-                else [],
-                "education": json.loads(processed_resume.education).get("education", [])
-                if processed_resume.education
-                else [],
-                "extracted_keywords": json.loads(
-                    processed_resume.extracted_keywords
-                ).get("extracted_keywords", [])
-                if processed_resume.extracted_keywords
-                else [],
+                "personal_data": safe_json_loads(processed_resume.personal_data),
+                "experiences": safe_json_loads(processed_resume.experiences, "experiences"),
+                "projects": safe_json_loads(processed_resume.projects, "projects"),
+                "skills": safe_json_loads(processed_resume.skills, "skills"),
+                "research_work": safe_json_loads(processed_resume.research_work, "research_work"),
+                "achievements": safe_json_loads(processed_resume.achievements, "achievements"),
+                "education": safe_json_loads(processed_resume.education, "education"),
+                "extracted_keywords": safe_json_loads(
+                    processed_resume.extracted_keywords, "extracted_keywords"
+                ),
                 "processed_at": processed_resume.processed_at.isoformat()
                 if processed_resume.processed_at
                 else None,

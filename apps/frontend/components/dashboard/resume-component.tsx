@@ -44,13 +44,12 @@ const Resume: React.FC<ResumeProps> = ({ resumeData }) => {
 	console.log('Rendering Resume Component with data:', resumeData);
 	const { personalInfo, summary, experience, education, skills } = resumeData;
 
-	// Helper function to render contact details only if they exist
+	// 辅助函数：仅在存在值时渲染联系方式
 	const renderContactDetail = (label: string, value?: string, hrefPrefix: string = '') => {
 		if (!value) return null;
-		// Ensure website, linkedin, github links start with https:// if not already present
 		let finalHrefPrefix = hrefPrefix;
 		if (
-			['Website', 'LinkedIn', 'GitHub'].includes(label) &&
+			['网站', 'LinkedIn', 'GitHub'].includes(label) &&
 			!value.startsWith('http') &&
 			!value.startsWith('//')
 		) {
@@ -64,7 +63,7 @@ const Resume: React.FC<ResumeProps> = ({ resumeData }) => {
 
 		return (
 			<div className="text-sm">
-				<span className="font-semibold text-gray-200">{label}:</span>{' '}
+				<span className="font-semibold text-gray-200">{label}：</span>{' '}
 				{isLink ? (
 					<a
 						href={href}
@@ -82,64 +81,55 @@ const Resume: React.FC<ResumeProps> = ({ resumeData }) => {
 	};
 
 	return (
-		// Main container with dark background and base text color
 		<div className="font-mono bg-gray-950 text-gray-300 p-4 shadow-lg rounded-lg max-w-4xl mx-auto border border-gray-600">
-			{/* --- Personal Info Section --- */}
+			{/* --- 个人信息 --- */}
 			{personalInfo && (
 				<div className="text-center mb-4 text-md pb-6 border-gray-700">
-					{/* Lighter text for main headings */}
 					{personalInfo.name && (
 						<h1 className="text-3xl font-bold mb-2 text-white">{personalInfo.name}</h1>
 					)}
-					{/* Slightly lighter text for subtitle */}
 					{personalInfo.title && (
 						<h2 className="text-xl text-gray-400 mb-4">{personalInfo.title}</h2>
 					)}
 					<div className="grid grid-cols-3 gap-1 text-left px-2">
-						{renderContactDetail('Email', personalInfo.email, 'mailto:')}
-						{renderContactDetail('Phone', personalInfo.phone, 'tel:')}
-						{renderContactDetail('Location', personalInfo.location)}
-						{renderContactDetail('Website', personalInfo.website)}
+						{renderContactDetail('邮箱', personalInfo.email, 'mailto:')}
+						{renderContactDetail('电话', personalInfo.phone, 'tel:')}
+						{renderContactDetail('地址', personalInfo.location)}
+						{renderContactDetail('网站', personalInfo.website)}
 						{renderContactDetail('LinkedIn', personalInfo.linkedin)}
 						{renderContactDetail('GitHub', personalInfo.github)}
 					</div>
 				</div>
 			)}
 
-			{/* --- Summary Section --- */}
+			{/* --- 摘要 --- */}
 			{summary && (
 				<div className="mb-8">
-					{/* Lighter text for section titles */}
 					<h3 className="text-xl font-semibold border-b border-gray-700 pb-2 mb-3 text-gray-100">
-						Summary
+						摘要
 					</h3>
-					{/* Base text color for paragraph */}
 					<p className="text-sm leading-relaxed">{summary}</p>
 				</div>
 			)}
 
-			{/* --- Experience Section --- */}
+			{/* --- 工作经历 --- */}
 			{experience && experience.length > 0 && (
 				<div className="mb-8">
 					<h3 className="text-xl font-semibold border-b border-gray-700 pb-2 mb-4 text-gray-100">
-						Experience
+						工作经历
 					</h3>
 					{experience.map((exp) => (
 						<div key={exp.id} className="mb-5 pl-4 border-l-2 border-blue-500">
-							{/* Lighter text for job titles */}
 							{exp.title && (
 								<h4 className="text-lg font-semibold text-gray-100">{exp.title}</h4>
 							)}
-							{/* Adjusted gray for company/location */}
 							{exp.company && (
 								<p className="text-md font-medium text-gray-400">
 									{exp.company} {exp.location && `| ${exp.location}`}
 								</p>
 							)}
-							{/* Adjusted gray for dates */}
 							{exp.years && <p className="text-sm text-gray-500 mb-2">{exp.years}</p>}
 							{exp.description && exp.description.length > 0 && (
-								// Base text color for list items
 								<ul className="list-disc list-outside ml-5 text-sm space-y-1">
 									{exp.description.map((desc, index) => (
 										<li key={index}>{desc}</li>
@@ -151,43 +141,38 @@ const Resume: React.FC<ResumeProps> = ({ resumeData }) => {
 				</div>
 			)}
 
-			{/* --- Education Section --- */}
+			{/* --- 教育经历 --- */}
 			{education && education.length > 0 && (
 				<div className="mb-8">
 					<h3 className="text-xl font-semibold border-b border-gray-700 pb-2 mb-4 text-gray-100">
-						Education
+						教育经历
 					</h3>
 					{education.map((edu) => (
 						<div key={edu.id} className="mb-5 pl-4 border-l-2 border-green-500">
-							{/* Lighter text for institution */}
 							{edu.institution && (
 								<h4 className="text-lg font-semibold text-gray-100">
 									{edu.institution}
 								</h4>
 							)}
-							{/* Adjusted gray for degree */}
 							{edu.degree && (
 								<p className="text-md font-medium text-gray-400">{edu.degree}</p>
 							)}
-							{/* Adjusted gray for dates */}
 							{edu.years && <p className="text-sm text-gray-500 mb-2">{edu.years}</p>}
-							{/* Base text color for description */}
 							{edu.description && <p className="text-sm">{edu.description}</p>}
 						</div>
 					))}
 				</div>
 			)}
 
-			{/* --- Skills Section --- */}
+			{/* --- 技能 --- */}
 			{skills && skills.length > 0 && (
 				<div>
 					<h3 className="text-xl font-semibold border-b border-gray-700 pb-2 mb-3 text-gray-100">
-						Skills
+						技能
 					</h3>
 					<div className="flex flex-wrap gap-2">
 						{skills.map(
 							(skill, index) =>
-								// Adjusted background and text for skill tags
 								skill && (
 									<span
 										key={index}

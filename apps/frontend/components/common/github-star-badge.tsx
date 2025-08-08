@@ -37,7 +37,7 @@ const GitHubStarBadge = () => {
 						/>
 					</svg>
 
-					<span>Star resume matcher on</span>
+					<span>在GitHub上为Resume Matcher加星</span>
 
 					<svg
 						width="22"
