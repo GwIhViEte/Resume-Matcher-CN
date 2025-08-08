@@ -1,5 +1,4 @@
 {
-  "version": 2,
   "builds": [
     {
       "src": "apps/backend/app/main.py",
@@ -10,10 +9,10 @@
       "use": "@vercel/next"
     }
   ],
-  "routes": [
+  "rewrites": [
     {
-      "src": "/api_be/(.*)",
-      "dest": "apps/backend/app/main.py"
+      "source": "/api_be/:path*",
+      "destination": "/apps/backend/app/main.py"
     }
   ]
 }
