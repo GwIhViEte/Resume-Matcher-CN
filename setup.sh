@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
-# setup.sh - cross-platform setup for Resume Matcher
+# setup.sh - cross-platform setup for Resume Matcher (OpenAI API version)
 #
 # Usage:
 #   ./setup.sh [--help] [--start-dev]
 #
 # Requirements:
 #   • Bash 4.4+ (for associative arrays)
-#   • curl (for uv & ollama installers, if needed)
+#   • curl
 #
 # After setup:
 #   npm run dev       # start development server
@@ -28,7 +28,7 @@ esac
 #–– CLI help ––#
 usage() {
   cat <<EOF
-Usage: $0 [--help] [--start-dev]
+Usage: \$0 [--help] [--start-dev]
 
 Options:
   --help       Show this help message and exit
@@ -36,7 +36,6 @@ Options:
 
 This script will:
   • Verify required tools: node, npm, python3, pip3, uv
-  • Install Ollama & pull relevant models
   • Install root dependencies via npm ci
   • Bootstrap both frontend and backend .env files
   • Bootstrap backend venv and install Python deps via uv
@@ -61,7 +60,7 @@ info "Detected operating system: $OS_TYPE"
 
 #–– 1. Prerequisite checks ––#
 check_cmd() {
-  local cmd=$1
+  local cmd=\$1
   if ! command -v "$cmd" &> /dev/null; then
     error "$cmd is not installed. Please install it and retry."
   fi
@@ -106,52 +105,23 @@ fi
 check_cmd uv
 success "All prerequisites satisfied."
 
-#–– 2. Ollama & model setup ––#
-ollama_check_or_pull() {
-      model_name="$1"
-      if ! ollama list | grep -q "$model_name"; then
-	  info "Pulling $model_name model…"
-	  ollama pull "$model_name" || error "Failed to pull $model_name model"
-	  success "$model_name model ready"
-      else
-	  info "$model_name model already present—skipping"
-      fi
-}
-
-info "Checking Ollama installation…"
-if ! command -v ollama &> /dev/null; then
-  info "ollama not found; installing…"
-
-  if [[ "$OS_TYPE" == "macOS" ]]; then
-    brew install ollama || error "Failed to install Ollama via Homebrew"
-  else
-    # Download Ollama installer securely without using curl | sh
-    curl -Lo ollama-install.sh https://ollama.com/install.sh || error "Failed to download Ollama installer"
-    chmod +x ollama-install.sh
-    ./ollama-install.sh || error "Failed to execute Ollama installer"
-    rm ollama-install.sh
-    export PATH="$HOME/.local/bin:$PATH"
-  fi
-  success "Ollama installed"
-fi
-
-#–– 3. Bootstrap root .env ––#
+#–– 2. Bootstrap root .env ––#
 if [[ -f .env.example && ! -f .env ]]; then
   info "Bootstrapping root .env from .env.example"
   cp .env.example .env
-  success "Root .env created"
+  success "Root .env created (Please edit it to add your OPENAI_API_KEY)"
 elif [[ -f .env ]]; then
   info "Root .env already exists—skipping"
 else
   info "No .env.example at root—skipping"
 fi
 
-#–– 4. Install root dependencies ––#
+#–– 3. Install root dependencies ––#
 info "Installing root dependencies with npm ci…"
 npm ci
 success "Root dependencies installed."
 
-#–– 5. Setup backend ––#
+#–– 4. Setup backend ––#
 info "Setting up backend (apps/backend)…"
 (
   cd apps/backend
@@ -160,21 +130,9 @@ info "Setting up backend (apps/backend)…"
   if [[ -f .env.sample && ! -f .env ]]; then
     info "Bootstrapping backend .env from .env.sample"
     cp .env.sample .env
-    success "Backend .env created"
+    success "Backend .env created (Please edit it to add your OPENAI_API_KEY)"
   else
     info "Backend .env exists or .env.sample missing—skipping"
-  fi
-
-  # The Ollama provider automatically pulls models on demand, but it's preferable to do it at setup time.
-  eval `grep ^LLM_PROVIDER= .env`
-  if [ "$LLM_PROVIDER" = "ollama" ]; then
-      eval `grep ^LL_MODEL .env`
-      ollama_check_or_pull $LL_MODEL
-  fi
-  eval `grep ^EMBEDDING_PROVIDER= .env`
-  if [ "$EMBEDDING_PROVIDER" = "ollama" ]; then
-      eval `grep ^EMBEDDING_MODEL .env`
-      ollama_check_or_pull $EMBEDDING_MODEL
   fi
 
   info "Syncing Python deps via uv…"
@@ -182,7 +140,7 @@ info "Setting up backend (apps/backend)…"
   success "Backend dependencies ready."
 )
 
-#–– 6. Setup frontend ––#
+#–– 5. Setup frontend ––#
 info "Setting up frontend (apps/frontend)…"
 (
   cd apps/frontend
@@ -190,9 +148,9 @@ info "Setting up frontend (apps/frontend)…"
   if [[ -f .env.sample && ! -f .env ]]; then
     info "Bootstrapping frontend .env from .env.sample"
     cp .env.sample .env
-    success "frontend .env created"
+    success "Frontend .env created"
   else
-    info "frontend .env exists or .env.sample missing—skipping"
+    info "Frontend .env exists or .env.sample missing—skipping"
   fi
 
   info "Installing frontend deps with npm ci…"
@@ -200,7 +158,7 @@ info "Setting up frontend (apps/frontend)…"
   success "Frontend dependencies ready."
 )
 
-#–– 7. Finish or start dev ––#
+#–– 6. Finish or start dev ––#
 if [[ "$START_DEV" == true ]]; then
   info "Starting development server…"
   # trap SIGINT for graceful shutdown
@@ -210,6 +168,7 @@ else
   success "🎉 Setup complete!
 
 Next steps:
+  • Edit .env files and add your OPENAI_API_KEY
   • Run \`npm run dev\` to start in development mode.
   • Run \`npm run build\` for production.
   • See SETUP.md for more details."
