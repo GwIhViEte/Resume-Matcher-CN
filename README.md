@@ -4,7 +4,6 @@
 
 # 📌 Resume Matcher 中文改进版
 
-[𝙹𝚘𝚒𝚗 𝙳𝚒𝚜𝚌𝚘𝚛𝚍](https://dsc.gg/resume-matcher) ✦ [𝚆𝚎𝚋𝚜𝚒𝚝𝚎](https://resumematcher.fyi) ✦ [𝙷𝚘𝚠 𝚝𝚘 𝙸𝚗𝚜𝚝𝚊𝚕𝚕 ](#how-to-install) ✦ [𝙲𝚘𝚗𝚝𝚛𝚒𝚋𝚞𝚝𝚘𝚛𝚜](#contributors) ✦ [𝙳𝚘𝚗𝚊𝚝𝚎](#support-the-development-by-donating) ✦ [𝚃𝚠𝚒𝚝𝚝𝚎𝚛/𝚇](https://twitter.com/_srbhr_) ✦ [𝙻𝚒𝚗𝚔𝚎𝚍𝙸𝚗](https://www.linkedin.com/company/resume-matcher/)
 
 🚀 **Resume Matcher 中文版** 是在原项目 [srbhr/resume-matcher](https://github.com/srbhr/resume-matcher) 的基础上进行的二次开发版本，主要面向中文用户，提供更友好的本地化体验与功能优化。  
 本项目支持 **智能职位-简历匹配**，并可基于职位要求优化简历，提高面试机会。
