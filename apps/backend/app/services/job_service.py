@@ -1,16 +1,18 @@
 import uuid
 import json
 import logging
-
 from typing import List, Dict, Any, Optional
+from datetime import datetime, timezone
+
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import HTTPException, status
 
 from app.agent import AgentManager
 from app.prompt import prompt_factory
 from app.schemas.json import json_schema_factory
-from app.models import Job, Resume, ProcessedJob
+from app.models import Job, Resume, ProcessedJob, Token
 from app.schemas.pydantic import StructuredJobModel
 from .exceptions import JobNotFoundError
 
@@ -22,16 +24,39 @@ class JobService:
         self.db = db
         self.json_agent_manager = AgentManager()
 
+    async def _validate_token(self, token_str: str) -> bool:
+        if not token_str:
+            return False
+        
+        # --- 关键修改：只验证，不设为无效 ---
+        query = select(Token).where(
+            Token.token == token_str, 
+            Token.is_valid == True,
+            Token.expires_at > datetime.now(timezone.utc)
+        )
+        result = await self.db.execute(query)
+        token = result.scalars().first()
+        
+        return token is not None
+
     async def create_and_store_job(self, job_data: dict) -> List[str]:
-        """
-        Stores job data in the database and returns a list of job IDs.
-        """
         resume_id = str(job_data.get("resume_id"))
+        model = job_data.get("model", "gpt-3.5-turbo")
+        token = job_data.get("token")
 
         if not await self._is_resume_available(resume_id):
             raise AssertionError(
                 f"resume corresponding to resume_id: {resume_id} not found"
             )
+
+        if model in ["gpt-5", "gpt-4o"]:
+            # --- 关键修改：调用只验证的函数 ---
+            is_valid_token = await self._validate_token(token)
+            if not is_valid_token:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="高级模型的Token无效、过期或丢失",
+                )
 
         job_ids = []
         for job_description in job_data.get("job_descriptions", []):
@@ -44,7 +69,7 @@ class JobService:
             self.db.add(job)
 
             await self._extract_and_store_structured_job(
-                job_id=job_id, job_description_text=job_description
+                job_id=job_id, job_description_text=job_description, model=model
             )
             logger.info(f"Job ID: {job_id}")
             job_ids.append(job_id)
@@ -53,20 +78,14 @@ class JobService:
         return job_ids
 
     async def _is_resume_available(self, resume_id: str) -> bool:
-        """
-        Checks if a resume exists in the database.
-        """
         query = select(Resume).where(Resume.resume_id == resume_id)
         result = await self.db.scalar(query)
         return result is not None
 
     async def _extract_and_store_structured_job(
-        self, job_id, job_description_text: str
+        self, job_id, job_description_text: str, model: str
     ):
-        """
-        extract and store structured job data in the database
-        """
-        structured_job = await self._extract_structured_json(job_description_text)
+        structured_job = await self._extract_structured_json(job_description_text, model=model)
         if not structured_job:
             logger.info("Structured job extraction failed.")
             return None
@@ -108,24 +127,18 @@ class JobService:
 
         self.db.add(processed_job)
         await self.db.flush()
-        await self.db.commit()
-
         return job_id
 
     async def _extract_structured_json(
-        self, job_description_text: str
+        self, job_description_text: str, model: str
     ) -> Dict[str, Any] | None:
-        """
-        Uses the AgentManager+JSONWrapper to ask the LLM to
-        return the data in exact JSON schema we need.
-        """
         prompt_template = prompt_factory.get("structured_job")
         prompt = prompt_template.format(
             json.dumps(json_schema_factory.get("structured_job"), indent=2),
             job_description_text,
         )
         logger.info(f"Structured Job Prompt: {prompt}")
-        raw_output = await self.json_agent_manager.run(prompt=prompt)
+        raw_output = await self.json_agent_manager.run(prompt=prompt, model=model)
 
         try:
             structured_job: StructuredJobModel = StructuredJobModel.model_validate(
@@ -137,18 +150,6 @@ class JobService:
         return structured_job.model_dump(mode="json")
 
     async def get_job_with_processed_data(self, job_id: str) -> Optional[Dict]:
-        """
-        Fetches both job and processed job data from the database and combines them.
-
-        Args:
-            job_id: The ID of the job to retrieve
-
-        Returns:
-            Combined data from both job and processed_job models
-
-        Raises:
-            JobNotFoundError: If the job is not found
-        """
         job_query = select(Job).where(Job.job_id == job_id)
         job_result = await self.db.execute(job_query)
         job = job_result.scalars().first()

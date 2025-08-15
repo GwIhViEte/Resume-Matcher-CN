@@ -1,4 +1,4 @@
-﻿# setup.ps1 - PowerShell setup script for Resume Matcher
+﻿# setup.ps1 - PowerShell setup script for Resume Matcher (OpenAI API version)
 
 [CmdletBinding()]
 param(
@@ -13,327 +13,162 @@ if ($Help) {
 Usage: .\setup.ps1 [-Help] [-StartDev]
 
 Options:
-  -Help       Show this help message and exit
-  -StartDev   After setup completes, start the dev server
+  -Help       显示此帮助消息并退出
+  -StartDev   安装完成后，启动开发服务器
 
-This Windows-only PowerShell script will:
-  - Verify required tools: node, npm, python3, pip3, uv (CORE DEPENDENCIES)
-  - Install Ollama via winget
-  - Pull gemma3:4b model
-  - Install root dependencies via npm
-  - Bootstrap both root and backend .env files
-  - Bootstrap backend venv and install Python deps via uv
-  - Install frontend dependencies via npm
+这个仅限Windows的PowerShell脚本将：
+  - 验证所需工具：node、npm、python3、pip3、uv
+  - 通过npm安装根依赖项
+  - 引导根文件和后端/前端.env文件
+  - 设置后端Python venv并通过uv安装依赖项
+  - 通过npm安装前端依赖项
 
-CORE DEPENDENCIES (script will fail if missing):
+核心依赖项：
   - Node.js v18+
   - npm
   - Python 3
   - pip
-  - uv (will attempt auto-install)
-
-Windows Requirements:
-  - PowerShell 5.1 or later
-  - winget (recommended for Ollama installation)
-
-For Linux/macOS systems:
-  - Use ./setup.sh instead of this script
+  - uv (will attempt auto-install via 国内镜像)
 "@
     exit 0
 }
 
-function Write-Info { 
-    param([string]$Message)
-    Write-Host "ℹ  $Message" -ForegroundColor Cyan
-}
+function Write-Info { param([string]$Message) Write-Host "ℹ  $Message" -ForegroundColor Cyan }
+function Write-Success { param([string]$Message) Write-Host "✔ $Message" -ForegroundColor Green }
+function Write-CustomError { param([string]$Message) Write-Host "✘ $Message" -ForegroundColor Red; exit 1 }
 
-function Write-Success { 
-    param([string]$Message)
-    Write-Host " $Message" -ForegroundColor Green
-}
+Write-Info "启动Resume Matcher（OpenAI API 模式）设置..."
 
-function Write-CustomError { 
-    param([string]$Message)
-    Write-Host " $Message" -ForegroundColor Red
-    exit 1
-}
+# 为本进程使用国内镜像源（不修改全局配置）
+$env:NPM_CONFIG_REGISTRY = "https://registry.npmmirror.com"
+$env:PIP_INDEX_URL = "https://pypi.tuna.tsinghua.edu.cn/simple"
+# uv 在解析 PyPI 时也会读取 pip 的 index-url；同时设置 UV_INDEX_URL（若支持）
+$env:UV_INDEX_URL = $env:PIP_INDEX_URL
 
-Write-Info "Starting Resume Matcher setup..."
+Write-Info "本次安装使用国内镜像：npm=$env:NPM_CONFIG_REGISTRY, PyPI=$env:PIP_INDEX_URL"
 
-# Detect OS
-$OS_TYPE = if ($IsWindows -or ($PSVersionTable.PSVersion.Major -le 5)) {
-    "Windows"
-} elseif ($IsLinux) {
-    "Linux"
-} elseif ($IsMacOS) {
-    "macOS"
-} else {
-    "Unknown"
-}
-
-Write-Info "Detected operating system: $OS_TYPE"
-
-# Only run on Windows
-if ($OS_TYPE -ne "Windows") {
-    Write-Host ""
-    Write-Host "❌ This PowerShell setup script is designed for Windows only." -ForegroundColor Red
-    Write-Host ""
-    Write-Host "For Linux/macOS systems, please use the bash setup script instead:" -ForegroundColor Yellow
-    Write-Host "  ./setup.sh" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "Or install dependencies manually:" -ForegroundColor Yellow
-    Write-Host "  1. Install Node.js v18+" -ForegroundColor Cyan
-    Write-Host "  2. Install Python 3" -ForegroundColor Cyan
-    Write-Host "  3. Install uv from https://astral.sh/uv/" -ForegroundColor Cyan
-    Write-Host "  4. Install Ollama from https://ollama.com" -ForegroundColor Cyan
-    Write-Host "  5. Run: npm install && npm run dev" -ForegroundColor Cyan
-    Write-Host ""
-    exit 1
-}
-
-# Check prerequisites
-Write-Info "Checking core prerequisites..."
-
-# Check Node.js - CORE DEPENDENCY
+# 检查 Node.js
 if (-not (Get-Command "node" -ErrorAction SilentlyContinue)) {
-    Write-CustomError "CORE DEPENDENCY MISSING: node is not installed. Please install Node.js and retry."
+    Write-CustomError "Node.js未安装，请安装Node.js v18+后重试"
 }
+$Version = node --version
+$Major = [int]($Version -replace "^v(\d+).*", '\$1')
+if ($Major -lt 18) {
+    Write-CustomError "Node.js版本过低，需要v18+（当前 $Version）"
+}
+Write-Success "Node.js $Version 检测通过"
 
-# Check npm - CORE DEPENDENCY
+# 检查 npm
 if (-not (Get-Command "npm" -ErrorAction SilentlyContinue)) {
-    Write-CustomError "CORE DEPENDENCY MISSING: npm is not installed. Please install npm and retry."
+    Write-CustomError "npm未安装，请安装npm后重试"
 }
+Write-Success "npm检测通过（使用国内镜像 $env:NPM_CONFIG_REGISTRY）"
 
-# Check Node version - CORE DEPENDENCY
-try {
-    $Version = node --version
-    $Major = [int]($Version -replace "^v(\d+).*", '$1')
-    if ($Major -lt 18) {
-        Write-CustomError "CORE DEPENDENCY VERSION ERROR: Node.js v18+ is required (found $Version)."
-    }
-    Write-Success "Node.js $Version is installed"
-} catch {
-    Write-CustomError "CORE DEPENDENCY ERROR: Failed to check Node.js version."
-}
+# 检查 Python
+$PythonCmd = if (Get-Command "python3" -ErrorAction SilentlyContinue) { "python3" } elseif (Get-Command "python" -ErrorAction SilentlyContinue) { "python" } else { $null }
+if (-not $PythonCmd) { Write-CustomError "未检测到Python 3，请安装 Python 3" }
+Write-Success "Python检测通过: $PythonCmd"
 
-# Check Python - CORE DEPENDENCY
-$PythonCmd = $null
-if (Get-Command "python3" -ErrorAction SilentlyContinue) {
-    $PythonCmd = "python3"
-} elseif (Get-Command "python" -ErrorAction SilentlyContinue) {
-    $PythonVersion = python --version 2>&1
-    if ($PythonVersion -match "Python 3\.") {
-        $PythonCmd = "python"
-    }
-}
+# 检查 pip
+$PipCmd = if (Get-Command "pip3" -ErrorAction SilentlyContinue) { "pip3" } elseif (Get-Command "pip" -ErrorAction SilentlyContinue) { "pip" } else { $null }
+if (-not $PipCmd) { Write-CustomError "未检测到pip，请安装 pip" }
+Write-Success "pip检测通过: $PipCmd（使用国内镜像 $env:PIP_INDEX_URL）"
 
-if (-not $PythonCmd) {
-    Write-CustomError "CORE DEPENDENCY MISSING: Python 3 is not installed. Please install Python 3 and retry."
-}
-
-Write-Success "Python is available as $PythonCmd"
-
-# Check pip - CORE DEPENDENCY
-$PipCmd = $null
-if (Get-Command "pip3" -ErrorAction SilentlyContinue) {
-    $PipCmd = "pip3"
-} elseif (Get-Command "pip" -ErrorAction SilentlyContinue) {
-    $PipCmd = "pip"
-} else {
-    Write-CustomError "CORE DEPENDENCY MISSING: pip is not available. Please install pip and retry."
-}
-
-Write-Success "pip is available as $PipCmd"
-
-# Check uv - CORE DEPENDENCY (try to install if missing)
+# 检查 uv（若不存在则用国内镜像安装）
 if (-not (Get-Command "uv" -ErrorAction SilentlyContinue)) {
-    Write-Info "CORE DEPENDENCY MISSING: uv not found; attempting to install via Astral.sh..."
-    try {
-        # Install uv for Windows using the recommended command
-        Write-Info "Running: powershell -ExecutionPolicy ByPass -c `"irm https://astral.sh/uv/install.ps1 | iex`""
-        Invoke-Expression "powershell -ExecutionPolicy ByPass -c `"irm https://astral.sh/uv/install.ps1 | iex`""
-        # Add to PATH for current session
-        $env:PATH = "$env:USERPROFILE\.local\bin;" + $env:PATH
-        Write-Success "uv installed successfully"
-    } catch {
-        Write-CustomError "CORE DEPENDENCY MISSING: Failed to install uv. Please install uv manually from https://docs.astral.sh/uv/"
-    }
-} else {
-    Write-Success "uv is already installed"
-}
+    Write-Info "uv未检测到，尝试使用国内镜像安装..."
 
-# Final check for uv
-if (-not (Get-Command "uv" -ErrorAction SilentlyContinue)) {
-    Write-CustomError "CORE DEPENDENCY MISSING: uv is not available. Please restart your terminal or install uv manually from https://docs.astral.sh/uv/"
-}
+    # 候选安装脚本镜像（按顺序尝试）
+    $installerUrls = @(
+        "https://mirror.ghproxy.com/https://astral.sh/uv/install.ps1",
+        "https://ghproxy.com/https://astral.sh/uv/install.ps1",
+        "https://astral.sh/uv/install.ps1" # 最后回退官方
+    )
 
-Write-Success "All core prerequisites satisfied."
-
-# Install Ollama if not present
-Write-Info "Checking Ollama installation..."
-if (-not (Get-Command "ollama" -ErrorAction SilentlyContinue)) {
-    Write-Info "ollama not found; installing..."
-    # Check if winget is available
-    if (Get-Command "winget" -ErrorAction SilentlyContinue) {
+    $scriptContent = $null
+    foreach ($u in $installerUrls) {
         try {
-            Write-Info "Installing Ollama using winget..."
-            winget install --id=Ollama.Ollama -e
-            Write-Success "Ollama installed via winget"
-            Write-Info "Please restart your terminal and run setup.ps1 again to complete the setup"
+            Write-Info "获取安装脚本：$u"
+            $resp = Invoke-WebRequest -UseBasicParsing -Uri $u -TimeoutSec 30
+            if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300 -and $resp.Content) {
+                $scriptContent = $resp.Content
+                break
+            }
         } catch {
-            Write-CustomError "Failed to install Ollama via winget. Please install manually from https://ollama.com/download/windows"
+            Write-Info "获取失败：$($_.Exception.Message)，尝试下一个镜像..."
         }
-    } else {
-        Write-CustomError "winget is not available. Please install Ollama manually from https://ollama.com/download/windows"
     }
-} else {
-    Write-Success "Ollama is already installed"
+
+    if (-not $scriptContent) {
+        Write-CustomError "无法获取 uv 安装脚本（镜像与官方均失败），请手动安装：https://docs.astral.sh/uv/"
+    }
+
+    # 将脚本内的 GitHub 资源域名重写为镜像加速
+    $scriptContent = $scriptContent `
+        -replace 'https://github.com', 'https://mirror.ghproxy.com/https://github.com' `
+        -replace 'https://objects.githubusercontent.com', 'https://mirror.ghproxy.com/https://objects.githubusercontent.com'
+
+    # 执行安装脚本
+    Invoke-Expression $scriptContent
+
+    # 更新 PATH（uv 默认安装到 %USERPROFILE%\.local\bin）
+    $env:PATH = "$env:USERPROFILE\.local\bin;$env:PATH"
 }
 
-# Pull Ollama model
-if (Get-Command "ollama" -ErrorAction SilentlyContinue) {
-    try {
-        $OllamaList = ollama list 2>&1
-        if ($OllamaList -notmatch "gemma3:4b") {
-            Write-Info "Pulling gemma3:4b model... (this may take a while)"
-            ollama pull gemma3:4b
-            Write-Success "gemma3:4b model ready"
-        } else {
-            Write-Info "gemma3:4b model already present—skipping"
-        }
-    } catch {
-        Write-Info "Warning: Failed to pull gemma3:4b model. You may need to install it manually later."
-    }
+if (-not (Get-Command "uv" -ErrorAction SilentlyContinue)) {
+    Write-CustomError "uv 安装失败，请参考文档手动安装：https://docs.astral.sh/uv/"
 }
+Write-Success "uv 检测通过"
 
-# Bootstrap root .env
+# 初始化根目录 .env
 if ((Test-Path ".env.example") -and (-not (Test-Path ".env"))) {
-    Write-Info "Bootstrapping root .env from .env.example"
+    Write-Info "从 .env.example 创建根目录配置文件 .env"
     Copy-Item ".env.example" ".env"
-    Write-Success "Root .env created"
+    Write-Success "根目录 .env 创建完成（请编辑填入 OPENAI_API_KEY）"
 } elseif (Test-Path ".env") {
-    Write-Info "Root .env already exists—skipping"
-} else {
-    Write-Info "No .env.example at root—skipping"
+    Write-Info "根目录 .env 已存在"
 }
 
-# Install root dependencies
-Write-Info "Installing root dependencies..."
-try {
-    # Install root dependencies (including concurrently)
-    Write-Info "Installing root dependencies (including concurrently)..."
-    npm install
-    Write-Success "Root dependencies installed successfully."
-} catch {
-    Write-Info "Warning: Failed to install root dependencies. You may need to run as Administrator or try manual installation."
-    Write-Info "Error: $($_.Exception.Message)"
-}
+# 安装根依赖（使用国内 npm 源）
+Write-Info "安装根依赖（npm install）"
+npm install
 
-# Setup backend
-Write-Info "Setting up backend (apps/backend)..."
+# 后端环境
 if (Test-Path "apps/backend") {
-    try {
-        Push-Location "apps/backend"
-        
-        if ((Test-Path ".env.sample") -and (-not (Test-Path ".env"))) {
-            Write-Info "Bootstrapping backend .env from .env.sample"
-            Copy-Item ".env.sample" ".env"
-            Write-Success "Backend .env created"
-        } else {
-            Write-Info "Backend .env exists or .env.sample missing—skipping"
-        }
-
-        # Create virtual environment and install dependencies using uv
-        Write-Info "Setting up Python virtual environment and dependencies..."
-        try {
-            # Create virtual environment if it doesn't exist
-            if (-not (Test-Path ".venv")) {
-                Write-Info "Creating Python virtual environment..."
-                uv venv
-                Write-Success "Virtual environment created"
-            } else {
-                Write-Info "Virtual environment already exists"
-            }
-            
-            # Install dependencies using uv sync (which handles venv activation automatically)
-            Write-Info "Syncing Python deps via uv..."
-            uv sync
-            Write-Success "Backend dependencies ready."
-        } catch {
-            Write-Info "uv sync failed, trying alternative installation..."
-            try {
-                # Fallback: install dependencies directly
-                uv pip install -e .
-                Write-Success "Backend dependencies installed via uv pip install."
-            } catch {
-                Write-Info "Warning: Failed to install backend dependencies. Error: $($_.Exception.Message)"
-            }
-        }
-    } catch {
-        Write-Info "Warning: Backend setup encountered issues. Error: $($_.Exception.Message)"
-    } finally {
-        Pop-Location
+    Push-Location "apps/backend"
+    if ((Test-Path ".env.sample") -and (-not (Test-Path ".env"))) {
+        Write-Info "从 .env.sample 创建后端 .env"
+        Copy-Item ".env.sample" ".env"
+        Write-Success "后端 .env 创建完成（请编辑填入 OPENAI_API_KEY）"
     }
-} else {
-    Write-Info "Backend directory not found—skipping"
+
+    if (-not (Test-Path ".venv")) {
+        Write-Info "创建 Python 虚拟环境（uv venv）"
+        uv venv
+    }
+    Write-Info "同步 Python 依赖（uv sync，使用 PyPI 镜像 $env:PIP_INDEX_URL）"
+    uv sync
+    Pop-Location
 }
 
-# Setup frontend
-Write-Info "Setting up frontend (apps/frontend)..."
+# 前端环境
 if (Test-Path "apps/frontend") {
-    try {
-        Push-Location "apps/frontend"
-        
-        if ((Test-Path ".env.sample") -and (-not (Test-Path ".env"))) {
-            Write-Info "Bootstrapping frontend .env from .env.sample"
-            Copy-Item ".env.sample" ".env"
-            Write-Success "Frontend .env created"
-        } else {
-            Write-Info "Frontend .env exists or .env.sample missing—skipping"
-        }
-
-        Write-Info "Installing frontend deps with npm ci..."
-        try {
-            # First try npm ci
-            npm ci 2>$null
-            Write-Success "Frontend dependencies ready."
-        } catch {
-            Write-Info "npm ci failed, trying npm install instead..."
-            try {
-                npm install
-                Write-Success "Frontend dependencies installed via npm install."
-            } catch {
-                Write-Info "Warning: Failed to install frontend dependencies. You may need to run as Administrator."
-                Write-Info "Error: $($_.Exception.Message)"
-            }
-        }
-    } catch {
-        Write-CustomError "Failed to setup frontend: $($_.Exception.Message)"
-    } finally {
-        Pop-Location
+    Push-Location "apps/frontend"
+    if ((Test-Path ".env.sample") -and (-not (Test-Path ".env"))) {
+        Write-Info "从 .env.sample 创建前端 .env"
+        Copy-Item ".env.sample" ".env"
+        Write-Success "前端 .env 创建完成"
     }
-} else {
-    Write-Info "Frontend directory not found—skipping"
+    Write-Info "安装前端依赖（npm install）"
+    npm install
+    Pop-Location
 }
 
-# Finish or start dev
+Write-Success "✅ 安装完成！"
+Write-Host "下一步操作：" -ForegroundColor Yellow
+Write-Host "  1. 打开 .env 文件并填入你的OPENAI_API_KEY和URL" -ForegroundColor Yellow
+Write-Host "  2. 运行 'npm run dev' 启动开发模式" -ForegroundColor Yellow
+
 if ($StartDev) {
-    Write-Info "Starting development server..."
-    try {
-        npm run dev
-    } catch {
-        Write-Info "Development server stopped."
-    }
-} else {
-    Write-Success @"
- Setup complete!
-
-Next steps:
-   Run 'npm run dev' to start in development mode.
-   Run 'npm run build' for production.
-   See SETUP.md for more details.
-
-Note: If Ollama was not installed automatically, please install it manually from:
-https://ollama.com/download/windows
-"@
+    npm run dev
 }

@@ -6,12 +6,14 @@ import logging
 import pdfplumber
 import docx
 from typing import Dict, Optional
+from datetime import datetime, timezone
 
+from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from pydantic import ValidationError
 
-from app.models import Resume, ProcessedResume
+from app.models import Resume, ProcessedResume, Token
 from app.agent import AgentManager
 from app.prompt import prompt_factory
 from app.schemas.json import json_schema_factory
@@ -48,22 +50,44 @@ class ResumeService:
         except Exception as e:
             logger.error(f"DOCX extraction failed: {str(e)}")
             raise ResumeValidationError(message=f"Word文档解析失败: {str(e)}")
+    
+    async def _validate_token(self, token_str: str) -> bool:
+        if not token_str:
+            return False
+        
+        # --- 关键修改：只验证，不设为无效 ---
+        query = select(Token).where(
+            Token.token == token_str, 
+            Token.is_valid == True,
+            Token.expires_at > datetime.now(timezone.utc)
+        )
+        result = await self.db.execute(query)
+        token = result.scalars().first()
+        
+        return token is not None
 
     async def convert_and_store_resume(
-        self, file_bytes: bytes, file_type: str, filename: str, content_type: str = "md"
+        self, file_bytes: bytes, file_type: str, filename: str, content_type: str = "md", model: str = "gpt-3.5-turbo", token: Optional[str] = None
     ):
         """
         Converts resume file (PDF/DOCX) to text and stores it in the database.
         """
+        if model in ["gpt-5", "gpt-4o"]:
+            # --- 关键修改：调用只验证的函数 ---
+            is_valid_token = await self._validate_token(token)
+            if not is_valid_token:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="高级模型的Token无效、过期或丢失。",
+                )
+
         file_extension = self._get_file_extension(file_type)
         
-        # 创建临时文件
         with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
             temp_file.write(file_bytes)
             temp_path = temp_file.name
 
         try:
-            # 提取文本内容
             if file_extension == ".pdf":
                 text_content = self._extract_text_from_pdf(temp_path)
             elif file_extension == ".docx":
@@ -76,11 +100,10 @@ class ResumeService:
                     message="无法从文档中提取文本。请确保文件包含文本内容而非图片。"
                 )
 
-            # 使用事务处理数据库操作
             try:
                 resume_id = await self._store_resume_in_db(text_content, content_type)
                 await self._extract_and_store_structured_resume(
-                    resume_id=resume_id, resume_text=text_content
+                    resume_id=resume_id, resume_text=text_content, model=model
                 )
                 await self.db.commit()
                 return resume_id
@@ -89,7 +112,6 @@ class ResumeService:
                 raise
                 
         finally:
-            # 清理临时文件
             if os.path.exists(temp_path):
                 try:
                     os.remove(temp_path)
@@ -97,7 +119,6 @@ class ResumeService:
                     logger.warning(f"Failed to remove temp file: {str(e)}")
 
     def _get_file_extension(self, file_type: str) -> str:
-        """Returns the appropriate file extension based on MIME type"""
         mime_to_ext = {
             "application/pdf": ".pdf",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx"
@@ -105,28 +126,21 @@ class ResumeService:
         return mime_to_ext.get(file_type, "")
 
     async def _store_resume_in_db(self, text_content: str, content_type: str) -> str:
-        """
-        Stores the parsed resume content in the database.
-        """
         resume_id = str(uuid.uuid4())
         resume = Resume(
             resume_id=resume_id, 
             content=text_content, 
             content_type=content_type
         )
-
         self.db.add(resume)
-        await self.db.flush()  # 不在这里 commit，让外层控制事务
+        await self.db.flush()
         return resume_id
 
     async def _extract_and_store_structured_resume(
-        self, resume_id: str, resume_text: str
+        self, resume_id: str, resume_text: str, model: str
     ) -> None:
-        """
-        Extract and store structured resume data in the database
-        """
         try:
-            structured_resume = await self._extract_structured_json(resume_text)
+            structured_resume = await self._extract_structured_json(resume_text, model=model)
             if not structured_resume:
                 logger.error("Structured resume extraction returned None.")
                 raise ResumeValidationError(
@@ -134,9 +148,7 @@ class ResumeService:
                     message="无法从简历中提取结构化数据。请确保简历包含必要的信息。",
                 )
 
-            # 优化 JSON 字段处理
             def safe_json_dumps(data: any, key: str = None) -> Optional[str]:
-                """安全地将数据转换为 JSON 字符串"""
                 if data is None:
                     return None
                 if key:
@@ -170,7 +182,7 @@ class ResumeService:
             )
 
             self.db.add(processed_resume)
-            await self.db.flush()  # 不在这里 commit
+            await self.db.flush()
             
         except ResumeValidationError:
             raise
@@ -181,19 +193,15 @@ class ResumeService:
                 message=f"存储结构化简历数据失败: {str(e)}",
             )
 
-    async def _extract_structured_json(self, resume_text: str) -> Optional[Dict]:
-        """
-        Uses the AgentManager+JSONWrapper to ask the LLM to
-        return the data in exact JSON schema we need.
-        """
+    async def _extract_structured_json(self, resume_text: str, model: str) -> Optional[Dict]:
         prompt_template = prompt_factory.get("structured_resume")
         prompt = prompt_template.format(
             json.dumps(json_schema_factory.get("structured_resume"), indent=2),
             resume_text,
         )
-        logger.debug(f"Structured Resume Prompt: {prompt[:500]}...")  # 只记录部分内容
+        logger.debug(f"Structured Resume Prompt: {prompt[:500]}...")
         
-        raw_output = await self.json_agent_manager.run(prompt=prompt)
+        raw_output = await self.json_agent_manager.run(prompt=prompt, model=model)
 
         try:
             structured_resume = StructuredResumeModel.model_validate(raw_output)
@@ -212,10 +220,6 @@ class ResumeService:
             )
 
     async def get_resume_with_processed_data(self, resume_id: str) -> Optional[Dict]:
-        """
-        Fetches both resume and processed resume data from the database and combines them.
-        """
-        # 使用单个查询获取关联数据（如果模型支持关系）
         resume_query = select(Resume).where(Resume.resume_id == resume_id)
         resume_result = await self.db.execute(resume_query)
         resume = resume_result.scalars().first()
@@ -241,9 +245,7 @@ class ResumeService:
         }
 
         if processed_resume:
-            # 优化 JSON 解析
             def safe_json_loads(data: str, key: str = None) -> any:
-                """安全地解析 JSON 字符串"""
                 if not data:
                     return [] if key else None
                 try:

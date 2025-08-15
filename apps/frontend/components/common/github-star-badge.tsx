@@ -1,7 +1,7 @@
 import Link from 'next/link';
 
 const GitHubStarBadge = () => {
-	const githubRepoUrl = 'https://github.com/srbhr/resume-matcher';
+	const githubRepoUrl = 'https://github.com/GwIhViEte/Resume-Mather-CN';
 
 	return (
 		<Link
@@ -37,7 +37,7 @@ const GitHubStarBadge = () => {
 						/>
 					</svg>
 
-					<span>在GitHub上为Resume Matcher加星</span>
+					<span>在GitHub上为Resume-Matcher-CN加星</span>
 
 					<svg
 						width="22"

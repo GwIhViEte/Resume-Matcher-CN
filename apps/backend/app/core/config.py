@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     # which is copied to the user's .env file upon setup.
     PROJECT_NAME: str = "Resume Matcher"
     FRONTEND_PATH: str = os.path.join(os.path.dirname(__file__), "frontend", "assets")
-    ALLOWED_ORIGINS: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    ALLOWED_ORIGINS: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000","http://localhost:3001","http://47.122.55.152:3001","http://127.0.0.1:3001","http://47.122.55.152"]
     DB_ECHO: bool = False
     PYTHONDONTWRITEBYTECODE: int = 1
     SYNC_DATABASE_URL: Optional[str] = None

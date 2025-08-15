@@ -1,8 +1,10 @@
 import logging
 import traceback
-
+import uuid as uuid_pkg
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi import (
     APIRouter,
@@ -16,6 +18,7 @@ from fastapi import (
 )
 
 from app.core import get_db_session
+from app.models import Token 
 from app.services import (
     ResumeService,
     ScoreImprovementService,
@@ -34,19 +37,51 @@ logger = logging.getLogger(__name__)
 
 
 @resume_router.post(
+    "/admin/generate-token",
+    summary="Generate a new token for premium features",
+    tags=["Admin"],
+)
+async def generate_token(
+    days: int = Query(30, description="Number of days the token will be valid for"),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Generates a new unique token and stores it in the database.
+    """
+    new_token_str = str(uuid_pkg.uuid4())
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(days=days)
+    
+    # --- 关键修改：手动添加 created_at ---
+    new_token = Token(
+        token=new_token_str, 
+        is_valid=True,
+        created_at=now, 
+        expires_at=expires_at
+    )
+    db.add(new_token)
+    await db.commit()
+    return {
+        "token": new_token_str, 
+        "message": "Token generated successfully",
+        "valid_for_days": days,
+        "expires_at": expires_at.isoformat()
+    }
+
+
+@resume_router.post(
     "/upload",
     summary="Upload a resume in PDF or DOCX format and store it into DB in HTML/Markdown format",
 )
 async def upload_resume(
     request: Request,
     file: UploadFile = File(...),
+    model: str = Query("gpt-3.5-turbo"),
+    token: str = Query(None),
     db: AsyncSession = Depends(get_db_session),
 ):
     """
     Accepts a PDF or DOCX file, converts it to HTML/Markdown, and stores it in the database.
-
-    Raises:
-        HTTPException: If the file type is not supported or if the file is empty.
     """
     request_id = getattr(request.state, "request_id", str(uuid4()))
 
@@ -75,6 +110,8 @@ async def upload_resume(
             file_type=file.content_type,
             filename=file.filename,
             content_type="md",
+            model=model,
+            token=token,
         )
     except ResumeValidationError as e:
         logger.warning(f"Resume validation failed: {str(e)}")
@@ -82,6 +119,8 @@ async def upload_resume(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(e),
         )
+    except HTTPException as e:
+        raise e
     except Exception as e:
         logger.error(
             f"Error processing file: {str(e)} - traceback: {traceback.format_exc()}"
@@ -112,41 +151,21 @@ async def score_and_improve(
 ):
     """
     Scores and improves a resume against a job description.
-
-    Raises:
-        HTTPException: If the resume or job is not found.
     """
     request_id = getattr(request.state, "request_id", str(uuid4()))
     headers = {"X-Request-ID": request_id}
 
-    request_payload = payload.model_dump()
-
     try:
-        resume_id = str(request_payload.get("resume_id", ""))
-        if not resume_id:
-            raise ResumeNotFoundError(
-                message="invalid value passed in `resume_id` field, please try again with valid resume_id."
-            )
-        job_id = str(request_payload.get("job_id", ""))
-        if not job_id:
-            raise JobNotFoundError(
-                message="invalid value passed in `job_id` field, please try again with valid job_id."
-            )
         score_improvement_service = ScoreImprovementService(db=db)
 
         if stream:
-            return StreamingResponse(
-                content=score_improvement_service.run_and_stream(
-                    resume_id=resume_id,
-                    job_id=job_id,
-                ),
-                media_type="text/event-stream",
-                headers=headers,
-            )
+             raise HTTPException(status_code=501, detail="Streaming not fully implemented with new params yet.")
         else:
             improvements = await score_improvement_service.run(
-                resume_id=resume_id,
-                job_id=job_id,
+                resume_id=str(payload.resume_id),
+                job_id=str(payload.job_id),
+                model=payload.model,
+                token=payload.token,
             )
             return JSONResponse(
                 content={
@@ -191,6 +210,8 @@ async def score_and_improve(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(e),
         )
+    except HTTPException as e: # Re-raise HTTP exceptions from services
+        raise e
     except Exception as e:
         logger.error(f"Error: {str(e)} - traceback: {traceback.format_exc()}")
         raise HTTPException(
@@ -210,15 +231,6 @@ async def get_resume(
 ):
     """
     Retrieves resume data from both resume_model and processed_resume model by resume_id.
-
-    Args:
-        resume_id: The ID of the resume to retrieve
-
-    Returns:
-        Combined data from both resume and processed_resume models
-
-    Raises:
-        HTTPException: If the resume is not found or if there's an error fetching data.
     """
     request_id = getattr(request.state, "request_id", str(uuid4()))
     headers = {"X-Request-ID": request_id}

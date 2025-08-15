@@ -12,7 +12,7 @@ export default function UploadResume() {
 				</h1>
 				{/* 新增必填/选填字段说明 */}
 				<div className="bg-gray-800/50 border border-gray-700 rounded-md p-4 text-sm text-gray-300 mb-8">
-					<p className="mb-2 font-semibold text-white">📌 简历填写要求</p>
+					<p className="mb-2 font-semibold text-white">📌简历填写要求</p>
 					<ul className="list-disc list-inside space-y-1">
 					<li>
 						<span className="text-red-400">必填</span>：

@@ -18,8 +18,13 @@ export default function JobDescriptionUploadTextArea() {
 	const [jobId, setJobId] = useState<string | null>(null);
 
 	const { setImprovedData } = useResumePreview();
-	const resumeId = useSearchParams().get('resume_id')!;
+	const searchParams = useSearchParams();
 	const router = useRouter();
+
+	const resumeId = searchParams.get('resume_id')!;
+	const model = searchParams.get('model') || 'gpt-3.5-turbo';
+	const token = searchParams.get('token');
+
 
 	const handleChange = useCallback(
 		(e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -45,7 +50,8 @@ export default function JobDescriptionUploadTextArea() {
 
 			setSubmissionStatus('submitting');
 			try {
-				const id = await uploadJobDescriptions([trimmed], resumeId);
+                // --- 关键修改：在这里把 model 和 token 传递进去 ---
+				const id = await uploadJobDescriptions([trimmed], resumeId, model, token);
 				setJobId(id);
 				setSubmissionStatus('success');
 				setFlash({ type: 'success', message: '职位描述提交成功！' });
@@ -55,7 +61,7 @@ export default function JobDescriptionUploadTextArea() {
 				setFlash({ type: 'error', message: (err as Error).message });
 			}
 		},
-		[text, resumeId]
+		[text, resumeId, model, token]
 	);
 
 	const handleImprove = useCallback(async () => {
@@ -63,7 +69,7 @@ export default function JobDescriptionUploadTextArea() {
 
 		setImprovementStatus('improving');
 		try {
-			const preview = await improveResume(resumeId, jobId);
+			const preview = await improveResume(resumeId, jobId, model, token);
 			setImprovedData(preview);
 			router.push('/dashboard');
 		} catch (err) {
@@ -71,7 +77,7 @@ export default function JobDescriptionUploadTextArea() {
 			setImprovementStatus('error');
 			setFlash({ type: 'error', message: (err as Error).message });
 		}
-	}, [resumeId, jobId, setImprovedData, router]);
+	}, [resumeId, jobId, model, token, setImprovedData, router]);
 
 	const isNextDisabled = text.trim() === '' || submissionStatus === 'submitting';
 

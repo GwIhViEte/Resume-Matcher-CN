@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
 	AlertCircleIcon,
 	CheckCircle2Icon,
@@ -28,6 +28,28 @@ export default function FileUpload() {
 		message: string;
 	} | null>(null);
 
+	const [selectedModel, setSelectedModel] = useState('gpt-4.1-mini');
+	const [token, setToken] = useState('');
+
+	// 精确指定需要 Token 的模型
+	const isPremiumModel = useMemo(() => {
+		return ['gpt-5', 'gpt-4o'].includes(selectedModel);
+	}, [selectedModel]);
+
+	// 只有在所有条件都满足时，上传按钮才可用
+	const isUploadDisabled = useMemo(() => {
+		if (isPremiumModel && !token.trim()) {
+			return true; // 如果是高级模型但没有 token，则禁用
+		}
+		return false;
+	}, [isPremiumModel, token]);
+
+	// 将模型和 token 都附加到 URL 后面
+	const uploadUrlWithParams = `${API_RESUME_UPLOAD_URL}?model=${encodeURIComponent(
+		selectedModel
+	)}&token=${encodeURIComponent(token)}`;
+
+
 	const [
 		{ files, isDragging, errors: validationOrUploadErrors, isUploadingGlobal },
 		{
@@ -44,7 +66,9 @@ export default function FileUpload() {
 		maxSize,
 		accept: acceptString,
 		multiple: false,
-		uploadUrl: API_RESUME_UPLOAD_URL,
+		uploadUrl: uploadUrlWithParams, // 使用这个新的 URL
+		// @ts-ignore
+		disabled: isUploadDisabled, // 将禁用状态传递给上传钩子
 		onUploadSuccess: (uploadedFile, response) => {
 			console.log('上传成功:', uploadedFile, response);
 			const data = response as Record<string, unknown> & { resume_id?: string }
@@ -65,8 +89,16 @@ export default function FileUpload() {
 				message: `${(uploadedFile.file as FileMetadata).name} 上传成功！`,
 			});
 			clearErrors();
-			const encodedResumeId = encodeURIComponent(resumeId);
-			window.location.href = `/jobs?resume_id=${encodedResumeId}`;
+			
+			// 将 resumeId, model, 和 token 都传递到下一个页面
+			const params = new URLSearchParams({
+				resume_id: resumeId,
+				model: selectedModel,
+			});
+			if (token) {
+				params.set('token', token);
+			}
+			window.location.href = `/jobs?${params.toString()}`;
 		},
 		onUploadError: (file, errorMsg) => {
 			console.error('上传出错:', file, errorMsg);
@@ -94,29 +126,76 @@ export default function FileUpload() {
 
 	return (
 		<div className="flex w-full flex-col gap-4 rounded-lg">
+			{/* 模型选择下拉框 */}
+			<div className="w-full">
+				<label htmlFor="model-select" className="block text-sm font-medium text-gray-300 mb-2">
+					选择模型
+				</label>
+				<select
+					id="model-select"
+					value={selectedModel}
+					onChange={(e) => setSelectedModel(e.target.value)}
+					className="w-full p-2 rounded-md bg-gray-800/50 border border-gray-700 text-white focus:ring-blue-500 focus:border-blue-500"
+				>
+					<option value="gpt-5-nano">GPT-5-nano</option>
+					<option value="gpt-4.1-mini">GPT-4.1-mini</option>
+					<option value="gpt-5-mini">GPT-5-mini</option>
+					<option value="gpt-5">GPT-5-需要Token</option>
+					<option value="gpt-4o">GPT-4o-需要Token</option>
+				</select>
+			</div>
+
+			{/* 条件渲染的 Token 输入框 */}
+			{isPremiumModel && (
+				<div className="w-full">
+					{/* --- 把 Label 和新增的链接包起来 --- */}
+					<div className="flex justify-between items-center mb-2">
+						<label htmlFor="token-input" className="block text-sm font-medium text-gray-300">
+							输入 Token
+						</label>
+						<a
+							href="https://m.tb.cn/h.hIdTNhD?tk=KCJF4RJmPWZ" // <-- 在这里换成你的咸鱼链接
+							target="_blank"
+							rel="noopener noreferrer"
+							className="text-xs text-blue-400 hover:text-blue-300 hover:underline"
+						>
+							获取token
+						</a>
+					</div>
+					<input
+						id="token-input"
+						type="password"
+						value={token}
+						onChange={(e) => setToken(e.target.value)}
+						placeholder="输入Token以解锁高级模型"
+						className="w-full p-2 rounded-md bg-gray-800/50 border border-gray-700 text-white focus:ring-blue-500 focus:border-blue-500"
+					/>
+				</div>
+			)}
+			
 			<div
 				role="button"
-				tabIndex={!currentFile && !isUploadingGlobal ? 0 : -1}
-				onClick={!currentFile && !isUploadingGlobal ? openFileDialog : undefined}
+				tabIndex={!currentFile && !isUploadingGlobal && !isUploadDisabled ? 0 : -1}
+				onClick={!currentFile && !isUploadingGlobal && !isUploadDisabled ? openFileDialog : undefined}
 				onKeyDown={(e) => {
-					if ((e.key === 'Enter' || e.key === ' ') && !currentFile && !isUploadingGlobal)
+					if ((e.key === 'Enter' || e.key === ' ') && !currentFile && !isUploadingGlobal && !isUploadDisabled)
 						openFileDialog();
 				}}
-				onDragEnter={!isUploadingGlobal ? handleDragEnter : undefined}
-				onDragLeave={!isUploadingGlobal ? handleDragLeave : undefined}
-				onDragOver={!isUploadingGlobal ? handleDragOver : undefined}
-				onDrop={!isUploadingGlobal ? handleDrop : undefined}
+				onDragEnter={!isUploadingGlobal && !isUploadDisabled ? handleDragEnter : undefined}
+				onDragLeave={!isUploadingGlobal && !isUploadDisabled ? handleDragLeave : undefined}
+				onDragOver={!isUploadingGlobal && !isUploadDisabled ? handleDragOver : undefined}
+				onDrop={!isUploadingGlobal && !isUploadDisabled ? handleDrop : undefined}
 				data-dragging={isDragging || undefined}
 				className={`relative rounded-xl border-2 border-dashed transition-all duration-300 ease-in-out
-                    ${currentFile || isUploadingGlobal
+                    ${currentFile || isUploadingGlobal || isUploadDisabled
 						? 'cursor-not-allowed opacity-70 border-gray-700'
 						: 'cursor-pointer border-gray-600 hover:border-primary hover:bg-gray-900/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background'
 					}
-                    ${isDragging && !isUploadingGlobal
+                    ${isDragging && !isUploadingGlobal && !isUploadDisabled
 						? 'border-primary bg-primary/10'
 						: 'bg-gray-900/50'
 					}`}
-				aria-disabled={Boolean(currentFile) || isUploadingGlobal}
+				aria-disabled={Boolean(currentFile) || isUploadingGlobal || isUploadDisabled}
 				aria-label={
 					currentFile
 						? '文件已选择。删除后可上传其他文件。'
@@ -139,7 +218,7 @@ export default function FileUpload() {
 								<UploadIcon className="size-6" />
 							</div>
 							<p className="mb-1 text-lg font-semibold text-white">
-								{currentFile ? '文件已就绪' : '上传你的简历'}
+								{isUploadDisabled ? "请在上方输入Token" : (currentFile ? '文件已就绪' : '上传你的简历')}
 							</p>
 							<p className="text-sm text-muted-foreground">
 								{currentFile

@@ -1,3 +1,5 @@
+'use client';
+
 import { ResumePreviewProvider } from '@/components/common/resume_previewer_context';
 
 export default function DefaultLayout({ children }: { children: React.ReactNode }) {

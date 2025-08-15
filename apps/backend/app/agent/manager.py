@@ -1,14 +1,16 @@
 import os
+import logging # 导入日志模块
 from typing import Dict, Any
 
 from ..core import settings
 from .strategies.wrapper import JSONWrapper, MDWrapper
 from .providers.base import Provider, EmbeddingProvider
 
+logger = logging.getLogger(__name__) # 获取日志记录器
+
 class AgentManager:
     def __init__(self,
                  strategy: str | None = None,
-                 model: str = settings.LL_MODEL,
                  model_provider: str = settings.LLM_PROVIDER
                  ) -> None:
         match strategy:
@@ -18,47 +20,49 @@ class AgentManager:
                 self.strategy = JSONWrapper()
             case _:
                 self.strategy = JSONWrapper()
-        self.model = model
+        # self.model = model # 不再在这里设置默认模型
         self.model_provider = model_provider
 
-    async def _get_provider(self, **kwargs: Any) -> Provider:
-        # Default options for any LLM. Not all can handle them
-        # (e.g. OpenAI doesn't take top_k) but each provider can make
-        # best effort.
+    async def _get_provider(self, model_name: str, **kwargs: Any) -> Provider:
+        # Default options for any LLM.
         opts = {
             "temperature": 0,
             "top_p": 0.9,
             "top_k": 40,
             "num_ctx": 20000
         }
+        
         opts.update(kwargs)
+        
+        # --- 关键修改：增加日志，明确打印出将要使用的模型 ---
+        logger.info(f"AgentManager is creating a provider with model: {model_name}")
+
         match self.model_provider:
             case 'openai':
                 from .providers.openai import OpenAIProvider
                 api_key = opts.get("llm_api_key", settings.LLM_API_KEY)
-                return OpenAIProvider(model_name=self.model,
+                return OpenAIProvider(model_name=model_name,
                                       api_key=api_key,
                                       opts=opts)
             case 'ollama':
                 from .providers.ollama import OllamaProvider
-                model = opts.get("model", self.model)
-                return OllamaProvider(model_name=model,
+                return OllamaProvider(model_name=model_name,
                                       opts=opts)
             case _:
                 from .providers.llama_index import LlamaIndexProvider
                 llm_api_key = opts.get("llm_api_key", settings.LLM_API_KEY)
                 llm_api_base_url = opts.get("llm_base_url", settings.LLM_BASE_URL)
                 return LlamaIndexProvider(api_key=llm_api_key,
-                                          model_name=self.model,
+                                          model_name=model_name,
                                           api_base_url=llm_api_base_url,
                                           provider=self.model_provider,
                                           opts=opts)
 
-    async def run(self, prompt: str, **kwargs: Any) -> Dict[str, Any]:
+    async def run(self, prompt: str, model: str, **kwargs: Any) -> Dict[str, Any]:
         """
         Run the agent with the given prompt and generation arguments.
         """
-        provider = await self._get_provider(**kwargs)
+        provider = await self._get_provider(model_name=model, **kwargs)
         return await self.strategy(prompt, provider, **kwargs)
 
 class EmbeddingManager:

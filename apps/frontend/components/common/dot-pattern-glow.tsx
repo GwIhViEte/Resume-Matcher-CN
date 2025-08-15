@@ -5,7 +5,7 @@ import { motion } from 'motion/react';
 import React, { useEffect, useId, useRef, useState } from 'react';
 
 /**
- *  DotPattern Component Props
+ * DotPattern Component Props
  *
  * @param {number} [width=16] - The horizontal spacing between dots
  * @param {number} [height=16] - The vertical spacing between dots
@@ -46,10 +46,10 @@ interface DotPatternProps extends React.SVGProps<SVGSVGElement> {
  *
  * // With glowing effect and custom spacing
  * <DotPattern
- *   width={20}
- *   height={20}
- *   glow={true}
- *   className="opacity-50"
+ * width={20}
+ * height={20}
+ * glow={true}
+ * className="opacity-50"
  * />
  *
  * @notes
@@ -75,6 +75,12 @@ export function DotPattern({
 	const id = useId();
 	const containerRef = useRef<SVGSVGElement>(null);
 	const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+	const [isMounted, setIsMounted] = useState(false);
+
+	useEffect(() => {
+		// 这个 effect 只在客户端运行，确保组件挂载后才设置 isMounted 为 true
+		setIsMounted(true);
+	}, []);
 
 	useEffect(() => {
 		const updateDimensions = () => {
@@ -120,7 +126,8 @@ export function DotPattern({
 					<stop offset="100%" stopColor="currentColor" stopOpacity="0" />
 				</radialGradient>
 			</defs>
-			{dots.map((dot) => (
+			{/* 只有在客户端挂载后才渲染光点，避免服务器和客户端内容不匹配 */}
+			{isMounted && dots.map((dot) => (
 				<motion.circle
 					key={`${dot.x}-${dot.y}`}
 					cx={dot.x}

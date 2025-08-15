@@ -1,19 +1,20 @@
 from .base import Base
-from sqlalchemy import Column, String, Integer
-# from sqlalchemy.orm import relationship
-
+from sqlalchemy import Column, String, Integer, Boolean, DateTime
 
 class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-
     email = Column(String, unique=True, index=True, nullable=False)
     name = Column(String, nullable=False)
 
-    # processed_resumes = relationship(
-    #     "ProcessedResume", back_populates="owner", cascade="all, delete-orphan"
-    # )
-    # processed_jobs = relationship(
-    #     "ProcessedJob", back_populates="owner", cascade="all, delete-orphan"
-    # )
+class Token(Base):
+    __tablename__ = "tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    token = Column(String, unique=True, index=True, nullable=False)
+    is_valid = Column(Boolean, default=True, nullable=False)
+    
+    # --- 关键修改：移除了 server_default ---
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=True)

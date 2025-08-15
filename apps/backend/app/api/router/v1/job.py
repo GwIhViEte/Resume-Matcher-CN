@@ -47,6 +47,7 @@ async def upload_job(
 
     try:
         job_service = JobService(db)
+        # --- 关键修改：将整个 payload 传递给服务 ---
         job_ids = await job_service.create_and_store_job(payload.model_dump())
 
     except AssertionError as e:
@@ -54,7 +55,8 @@ async def upload_job(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
-
+    except HTTPException as e: # Re-raise HTTP exceptions from services
+        raise e
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -66,7 +68,6 @@ async def upload_job(
         "job_id": job_ids,
         "request": {
             "request_id": request_id,
-            "payload": payload,
         },
     }
 

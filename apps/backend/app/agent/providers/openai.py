@@ -46,7 +46,7 @@ class OpenAIProvider(Provider):
     async def __call__(self, prompt: str, **generation_args: Any) -> str:
         myopts = {
             "temperature": self.opts.get("temperature", 0),
-            "top_p": self.opts.get("top_p", 0.9),
+            #"top_p": self.opts.get("top_p", 0.9),
         }
         # Combine any extra args, but local opts take precedence
         myopts.update(generation_args)
