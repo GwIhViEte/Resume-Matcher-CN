@@ -1,4 +1,4 @@
-﻿# setup.ps1 - PowerShell setup script for Resume Matcher (OpenAI API version)
+# setup.ps1 - PowerShell setup script for Resume Matcher (OpenAI API version)
 
 [CmdletBinding()]
 param(
@@ -16,6 +16,7 @@ Options:
   -Help       显示此帮助消息并退出
   -StartDev   安装完成后，启动开发服务器
 
+
 这个仅限Windows的PowerShell脚本将：
   - 验证所需工具：node、npm、python3、pip3、uv
   - 通过npm安装根依赖项
@@ -24,11 +25,13 @@ Options:
   - 通过npm安装前端依赖项
 
 核心依赖项：
+
   - Node.js v18+
   - npm
   - Python 3
   - pip
   - uv (will attempt auto-install via 国内镜像)
+
 "@
     exit 0
 }
@@ -36,6 +39,7 @@ Options:
 function Write-Info { param([string]$Message) Write-Host "ℹ  $Message" -ForegroundColor Cyan }
 function Write-Success { param([string]$Message) Write-Host "✔ $Message" -ForegroundColor Green }
 function Write-CustomError { param([string]$Message) Write-Host "✘ $Message" -ForegroundColor Red; exit 1 }
+
 
 Write-Info "启动Resume Matcher（OpenAI API 模式）设置..."
 
@@ -50,6 +54,7 @@ Write-Info "本次安装使用国内镜像：npm=$env:NPM_CONFIG_REGISTRY, PyPI=
 # 检查 Node.js
 if (-not (Get-Command "node" -ErrorAction SilentlyContinue)) {
     Write-CustomError "Node.js未安装，请安装Node.js v18+后重试"
+
 }
 $Version = node --version
 $Major = [int]($Version -replace "^v(\d+).*", '\$1')
