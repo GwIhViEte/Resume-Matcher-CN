@@ -154,7 +154,7 @@ export default function FileUpload() {
 							输入 Token
 						</label>
 						<a
-							href="https://m.tb.cn/h.hIdTNhD?tk=KCJF4RJmPWZ" // <-- 在这里换成你的咸鱼链接
+							href="https://m.tb.cn/" // <-- 在这里换成你的咸鱼链接
 							target="_blank"
 							rel="noopener noreferrer"
 							className="text-xs text-blue-400 hover:text-blue-300 hover:underline"
