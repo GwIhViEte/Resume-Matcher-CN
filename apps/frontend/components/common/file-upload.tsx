@@ -33,7 +33,7 @@ export default function FileUpload() {
 
 	// 精确指定需要 Token 的模型
 	const isPremiumModel = useMemo(() => {
-		return ['gpt-5', 'gpt-4o'].includes(selectedModel);
+		return ['gpt-4o'].includes(selectedModel);
 	}, [selectedModel]);
 
 	// 只有在所有条件都满足时，上传按钮才可用
@@ -140,8 +140,8 @@ export default function FileUpload() {
 					<option value="gpt-5-nano">GPT-5-nano</option>
 					<option value="gpt-4.1-mini">GPT-4.1-mini</option>
 					<option value="gpt-5-mini">GPT-5-mini</option>
-					<option value="gpt-5">GPT-5-需要Token</option>
-					<option value="gpt-4o">GPT-4o-需要Token</option>
+					<option value="gpt-5">GPT-5</option>
+					
 				</select>
 			</div>
 
