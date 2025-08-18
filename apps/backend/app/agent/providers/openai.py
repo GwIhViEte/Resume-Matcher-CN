@@ -18,8 +18,8 @@ class OpenAIProvider(Provider):
         if opts is None:
             opts = {}
         api_key = api_key or settings.LLM_API_KEY or os.getenv("OPENAI_API_KEY")
-                   logger.info(f"Attempting to use API Key: {api_key}")
-                   logger.info(f"LLM_API_KEY from settings: {settings.LLM_API_KEY}")
+        logger.info(f"Attempting to use API Key: {api_key}")
+        logger.info(f"LLM_API_KEY from settings: {settings.LLM_API_KEY}")
         if not api_key:
             raise ProviderError("OpenAI API key is missing")
         # Use the base_url from settings
