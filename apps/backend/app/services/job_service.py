@@ -49,7 +49,7 @@ class JobService:
                 f"resume corresponding to resume_id: {resume_id} not found"
             )
 
-        if model in ["gpt-5", "gpt-4o"]:
+        if model in ["gpt-4o"]:
             # --- 关键修改：调用只验证的函数 ---
             is_valid_token = await self._validate_token(token)
             if not is_valid_token:
