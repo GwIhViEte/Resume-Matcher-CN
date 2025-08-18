@@ -133,7 +133,7 @@ class ScoreImprovementService:
         token: Optional[str] = None,
     ) -> Tuple[str, float]:
     
-        if model in ["gpt-5", "gpt-4o"]:
+        if model in ["gpt-4o"]:
             is_valid_token = await self._validate_token(token)
             if not is_valid_token:
                 raise HTTPException(
