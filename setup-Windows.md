@@ -59,6 +59,7 @@ uv sync
 cd ../..
 ```
 安装`python-docx`、`pdfplumber`依赖
+
 5. 安装前端依赖
 
 **English**
