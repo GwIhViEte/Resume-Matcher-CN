@@ -59,7 +59,7 @@ uv sync
 cd ../..
 ```
 安装`python-docx`、`pdfplumber`依赖
-6. 安装前端依赖
+5. 安装前端依赖
 
 **English**
 The script auto-detects whether Chinese mirrors are reachable and switches both registry and language accordingly.
