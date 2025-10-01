@@ -82,7 +82,8 @@ If the backend installation fails with an error, try running the following comma
 ```bash
 cd apps/backend
 uv sync
-cd ../..```
+cd ../..
+```
 5. Install Frontend Dependencies Install all required Node.js packages for the frontend application.
 
 ---
