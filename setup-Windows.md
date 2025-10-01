@@ -74,11 +74,16 @@ The script auto-detects whether Chinese mirrors are reachable and switches both 
 - You can append `-StartDev` to execute `npm run dev` immediately after dependencies are installed.
 
 **What the script does:**
-1. Checks for Node/npm/Python/pip/uv, and installs uv if needed.
-2. Sets the download sources for npm, PyPI, and uv based on the network profile.
-3. Copies the `.env` example files for the root directory, backend, and frontend.
-4. Creates a virtual environment in the backend and automatically syncs dependencies (including `python-docx`, `pdfplumber`, etc.).
-5. Installs frontend dependencies.
+1. Check for Prerequisites Verify that Node.js, npm, Python, and pip are installed. The script will automatically install uv if it is not found.
+2. Configure Package Sources Set the download sources (mirrors/registries) for npm, PyPI, and uv based on the selected network profile.
+3. Set Up Environment Files Copy the .env.example files in the root, apps/backend, and apps/frontend directories to create your local .env files.
+4. Install Backend Dependencies Create a Python virtual environment for the backend and automatically sync all dependencies, including python-docx, pdfplumber, and others.
+If the backend installation fails with an error, try running the following commands manually:
+bash
+cd apps/backend
+uv sync
+cd ../..
+5. Install Frontend Dependencies Install all required Node.js packages for the frontend application.
 
 ---
 
