@@ -6,6 +6,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { useResumePreview } from '@/components/common/resume_previewer_context';
 import { uploadJobDescriptions, improveResume } from '@/lib/api/resume';
+import { useI18n } from '@/components/common/language-provider';
 
 type SubmissionStatus = 'idle' | 'submitting' | 'success' | 'error';
 type ImprovementStatus = 'idle' | 'improving' | 'error';
@@ -20,11 +21,11 @@ export default function JobDescriptionUploadTextArea() {
 	const { setImprovedData } = useResumePreview();
 	const searchParams = useSearchParams();
 	const router = useRouter();
+	const { t, locale } = useI18n();
 
 	const resumeId = searchParams.get('resume_id')!;
 	const model = searchParams.get('model') || 'gpt-3.5-turbo';
 	const token = searchParams.get('token');
-
 
 	const handleChange = useCallback(
 		(e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -32,36 +33,35 @@ export default function JobDescriptionUploadTextArea() {
 			setFlash(null);
 			if (submissionStatus !== 'idle') setSubmissionStatus('idle');
 		},
-		[submissionStatus]
+		[submissionStatus],
 	);
 
 	const handleUpload = useCallback(
-		async (e: React.FormEvent) => {
-			e.preventDefault();
+		async (event: React.FormEvent) => {
+			event.preventDefault();
 			const trimmed = text.trim();
 			if (!trimmed) {
-				setFlash({ type: 'error', message: '职位描述不能为空。' });
+				setFlash({ type: 'error', message: t('jobForm.flash.empty') });
 				return;
 			}
 			if (!resumeId) {
-				setFlash({ type: 'error', message: '缺少简历 ID。' });
+				setFlash({ type: 'error', message: t('jobForm.flash.missingResume') });
 				return;
 			}
 
 			setSubmissionStatus('submitting');
 			try {
-                // --- 关键修改：在这里把 model 和 token 传递进去 ---
-				const id = await uploadJobDescriptions([trimmed], resumeId, model, token);
+				const id = await uploadJobDescriptions([trimmed], resumeId, model, token, locale);
 				setJobId(id);
 				setSubmissionStatus('success');
-				setFlash({ type: 'success', message: '职位描述提交成功！' });
-			} catch (err) {
-				console.error(err);
+				setFlash({ type: 'success', message: t('jobForm.flash.success') });
+			} catch (error) {
+				console.error(error);
 				setSubmissionStatus('error');
-				setFlash({ type: 'error', message: (err as Error).message });
+				setFlash({ type: 'error', message: (error as Error).message });
 			}
 		},
-		[text, resumeId, model, token]
+		[text, resumeId, model, token, locale, t],
 	);
 
 	const handleImprove = useCallback(async () => {
@@ -69,15 +69,15 @@ export default function JobDescriptionUploadTextArea() {
 
 		setImprovementStatus('improving');
 		try {
-			const preview = await improveResume(resumeId, jobId, model, token);
+			const preview = await improveResume(resumeId, jobId, model, token, locale);
 			setImprovedData(preview);
 			router.push('/dashboard');
-		} catch (err) {
-			console.error(err);
+		} catch (error) {
+			console.error(error);
 			setImprovementStatus('error');
-			setFlash({ type: 'error', message: (err as Error).message });
+			setFlash({ type: 'error', message: (error as Error).message });
 		}
-	}, [resumeId, jobId, model, token, setImprovedData, router]);
+	}, [resumeId, jobId, model, token, locale, setImprovedData, router]);
 
 	const isNextDisabled = text.trim() === '' || submissionStatus === 'submitting';
 
@@ -88,7 +88,7 @@ export default function JobDescriptionUploadTextArea() {
 					className={`p-3 mb-4 text-sm rounded-md ${flash.type === 'error'
 						? 'bg-red-50 border border-red-200 text-red-800 dark:bg-red-900/20 dark:border-red-800/30 dark:text-red-300'
 						: 'bg-green-50 border border-green-200 text-green-800 dark:bg-green-900/20 dark:border-green-800/30 dark:text-green-300'
-						}`}
+					}`}
 					role="alert"
 				>
 					<p>{flash.message}</p>
@@ -100,7 +100,7 @@ export default function JobDescriptionUploadTextArea() {
 					htmlFor="jobDescription"
 					className="bg-zinc-950/80 text-white absolute start-1 top-0 z-10 block -translate-y-1/2 px-2 text-xs font-medium group-has-disabled:opacity-50"
 				>
-					职位描述 <span className="text-red-500">*</span>
+					{t('jobForm.label')} <span className="text-red-500">*</span>
 				</label>
 				<Textarea
 					id="jobDescription"
@@ -109,7 +109,7 @@ export default function JobDescriptionUploadTextArea() {
 					onChange={handleChange}
 					required
 					aria-required="true"
-					placeholder="请将职位描述粘贴到这里..."
+					placeholder={t('jobForm.placeholder')}
 					className="w-full bg-gray-800/30 focus:ring-1 border rounded-md dark:border-gray-600 focus:border-blue-500 focus:ring-blue-500/50 border-gray-300 min-h-[300px]"
 				/>
 			</div>
@@ -137,15 +137,15 @@ export default function JobDescriptionUploadTextArea() {
 								<path
 									className="opacity-75"
 									fill="currentColor"
-									d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+									d="M4 12a8 8 0 0 1 8-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 0 1 4 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
 								/>
 							</svg>
-							<span>正在提交...</span>
+							<span>{t('jobForm.submit.loading')}</span>
 						</>
 					) : submissionStatus === 'success' ? (
-						<span>已提交！</span>
+						<span>{t('jobForm.submit.success')}</span>
 					) : (
-						<span>下一步</span>
+						<span>{t('jobForm.submit.default')}</span>
 					)}
 				</Button>
 			</div>
@@ -157,7 +157,9 @@ export default function JobDescriptionUploadTextArea() {
 						disabled={improvementStatus === 'improving'}
 						className="font-semibold py-2 px-6 rounded min-w-[90px] bg-green-600 hover:bg-green-700 text-white"
 					>
-						{improvementStatus === 'improving' ? '正在优化...' : '优化'}
+						{improvementStatus === 'improving'
+							? t('jobForm.optimize.loading')
+							: t('jobForm.optimize.cta')}
 					</Button>
 				</div>
 			)}

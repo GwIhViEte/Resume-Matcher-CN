@@ -2,46 +2,54 @@
 
 [![Resume Matcher](assets/page_2.png)](https://www.resumematcher.fyi)
 
-# 📌 Resume Matcher 中文改进版
+# Resume Matcher 中文增强版
 
+本仓库在上游开源项目 [srbhr/resume-matcher](https://github.com/srbhr/resume-matcher) 基础上，对中文用户体验进行了全面优化，同时保留与原项目一致的部署与扩展方式。
 
-🚀 **Resume Matcher 中文版** 是在原项目 [srbhr/resume-matcher](https://github.com/srbhr/resume-matcher) 的基础上进行的二次开发版本，主要面向中文用户，提供更友好的本地化体验与功能优化。  
-本项目支持 **智能职位-简历匹配**，并可基于职位要求优化简历，提高面试机会。
+</div>
 
-## ✨ 改动亮点
+## ✨ 功能亮点
 
-- 🌐 **全界面中文化** — 前端 UI 文案、交互提示全部中文化，更贴合国内用户习惯  
-- 📋 **必填项 / 选填项提示** — 在简历上传页面明确提示哪些信息必须填写（姓名、联系方式、地区/国家、教育背景等）  
-- 🖼 **更友好的上传说明** — 直观的上传界面与格式限制说明（支持 PDF / DOCX / DOC，最大 2MB）  
-- 🔍 **职位分析中文化** — 职位分析器、分析摘要、改进建议均支持简体中文输出  
-- 🎯 **细节优化** — 调整按钮、提示框的文案和颜色，使 UI 更直观  
-- 📦 **可独立部署** — 与原项目保持功能一致，支持本地与服务器部署
-## 🔧 安装与运行
-### 1. 克隆项目
+- 🌏 **双语界面** —— 右上角可在简体中文 / English 之间切换，后台 API 会随语言返回对应文案。
+- 📝 **字段提示** —— 上传简历页清晰区分必填与选填信息，降低首次使用门槛。
+- 📤 **直观上传体验** —— 支持拖拽上传 PDF / DOC / DOCX（≤ 2 MB），内置格式与大小校验。
+- 🧠 **职位分析** —— 解析职位描述并提取关键词，辅助评估岗位匹配度。
+- 🎯 **匹配优化** —— LLM 自动生成改进版简历，并提供可操作的优化建议。
+- 🔒 **本地友好** —— 与上游项目共享部署脚本，方便自托管与二次开发。
+
+## 🚀 快速开始
 
 ```bash
 git clone https://github.com/GwIhViEte/Resume-Mather-CN.git
 cd Resume-Mather-CN
-```
-### 2. 安装依赖
-```bash
-# 安装依赖（Node + Python）
-# Node 版本建议 >=18, Python >=3.9
+
+# 安装前端依赖
 npm install
+
+# 安装后端依赖（需要 Python ≥ 3.9）
 pip install -r requirements.txt
-```
-### 3. 运行前端（Next.js）
-```bash
+
+# 启动前端（Next.js）
 cd apps/frontend
 npm run dev
 ```
 
-### 📜 开源协议
-本项目基于原项目 srbhr/resume-matcher 二次开发，原项目许可证适用于本项目。
+在 Windows 环境下，也可以使用一键脚本并按需指定网络模式：
 
+```powershell
+./setup.ps1 -NetworkProfile auto
+```
 
-## Resume Matcher is a part of [Vercel Open Source Program](https://vercel.com/oss)
+执行时脚本会根据网络连通性自动选择国内或官方源；如需手动指定，可传入 `-NetworkProfile china` 或 `-NetworkProfile global`。
 
+更多部署与配置说明请参考 `docs/` 目录或上游项目文档。
 
-![Vercel OSS Program](https://vercel.com/oss/program-badge.svg)
+## 🤝 贡献指南
 
+- 建议先阅读 `AGENTS.md` 获取仓库约定、开发流程与风格规范。
+- 所有 PR 需包含变更说明及验证方式；如涉及界面或 API 变更，请附截图或示例响应。
+- 欢迎提交 Issue，讨论中文场景下的更多优化点。
+
+## 📄 License
+
+本项目继承上游项目的开源许可，具体内容请参阅 `LICENSE` 文件。

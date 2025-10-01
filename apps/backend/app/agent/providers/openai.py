@@ -17,9 +17,23 @@ class OpenAIProvider(Provider):
                  opts: Dict[str, Any] = None):
         if opts is None:
             opts = {}
-        api_key = api_key or settings.LLM_API_KEY or os.getenv("OPENAI_API_KEY")
-        logger.info(f"Attempting to use API Key: {api_key}")
-        logger.info(f"LLM_API_KEY from settings: {settings.LLM_API_KEY}")
+
+        api_key_source = None
+        if api_key:
+            api_key_source = "argument"
+        else:
+            if settings.LLM_API_KEY:
+                api_key = settings.LLM_API_KEY
+                api_key_source = "settings"
+            else:
+                env_key = os.getenv("OPENAI_API_KEY")
+                if env_key:
+                    api_key = env_key
+                    api_key_source = "environment"
+
+        logger.info("Initialising OpenAI provider (key source: %s)", api_key_source or "unknown")
+
+
         if not api_key:
             raise ProviderError("OpenAI API key is missing")
         # Use the base_url from settings
@@ -28,12 +42,13 @@ class OpenAIProvider(Provider):
         self.opts = opts
         self.instructions = ""
 
-    def _generate_sync(self, prompt: str, options: Dict[str, Any]) -> str:
+    def _generate_sync(self, prompt: str, options: Dict[str, Any], client: OpenAI | None = None) -> str:
+        client = client or self._client
         try:
             # Note: The original code used a non-existent method `self._client.responses.create`.
             # The correct method for chat completions is `self._client.chat.completions.create`.
             # We also need to format the prompt correctly.
-            response = self._client.chat.completions.create(
+            response = client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": self.instructions or "You are a helpful assistant."},
@@ -48,11 +63,15 @@ class OpenAIProvider(Provider):
     async def __call__(self, prompt: str, **generation_args: Any) -> str:
         myopts = {
             "temperature": self.opts.get("temperature", 0),
-            #"top_p": self.opts.get("top_p", 0.9),
         }
-        # Combine any extra args, but local opts take precedence
         myopts.update(generation_args)
-        return await run_in_threadpool(self._generate_sync, prompt, myopts)
+
+        request_api_key = myopts.pop("token", None) or myopts.pop("api_key", None)
+        client = self._client
+        if request_api_key:
+            client = OpenAI(api_key=request_api_key, base_url=settings.LLM_BASE_URL, timeout=120.0)
+
+        return await run_in_threadpool(self._generate_sync, prompt, myopts, client)
 
 
 class OpenAIEmbeddingProvider(EmbeddingProvider):

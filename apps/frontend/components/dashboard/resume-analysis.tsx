@@ -11,6 +11,7 @@ import {
 	DialogFooter,
 	DialogClose,
 } from '@/components/ui/dialog';
+import { useI18n } from '@/components/common/language-provider';
 
 interface ImprovementSuggestion {
 	suggestion: string;
@@ -31,6 +32,7 @@ const ResumeAnalysis: React.FC<ResumeAnalysisProps> = ({
 	improvements,
 }) => {
 	const [isModalOpen, setIsModalOpen] = useState(false);
+	const { t } = useI18n();
 
 	const getScoreColor = (value: number) => {
 		if (value >= 80) return 'text-green-500';
@@ -38,8 +40,8 @@ const ResumeAnalysis: React.FC<ResumeAnalysisProps> = ({
 		return 'text-red-500';
 	};
 
-	const truncatedDetails = details.length > 100 ? details.slice(0, 97) + '...' : details;
-	const truncatedCommentary = commentary.length > 100 ? commentary.slice(0, 97) + '...' : commentary;
+	const truncatedDetails = details.length > 100 ? `${details.slice(0, 97)}...` : details;
+	const truncatedCommentary = commentary.length > 100 ? `${commentary.slice(0, 97)}...` : commentary;
 
 	return (
 		<div className="bg-gray-900/80 p-6 rounded-lg shadow-xl text-gray-100">
@@ -47,7 +49,7 @@ const ResumeAnalysis: React.FC<ResumeAnalysisProps> = ({
 				<DialogTrigger asChild>
 					<div className="cursor-pointer">
 						<div className="flex justify-between items-center mb-4">
-							<h3 className="text-xl font-semibold text-gray-100">简历分析</h3>
+							<h3 className="text-xl font-semibold text-gray-100">{t('resumeAnalysis.heading')}</h3>
 							<div className={`text-3xl font-bold ${getScoreColor(score)}`}>
 								{score}
 								<span className="text-sm">/100</span>
@@ -56,7 +58,7 @@ const ResumeAnalysis: React.FC<ResumeAnalysisProps> = ({
 						<p className="text-sm text-gray-400 mb-2">{truncatedDetails}</p>
 						<p className="text-sm text-gray-400">{truncatedCommentary}</p>
 						<Button variant="link" className="text-blue-400 hover:text-blue-300 p-0 h-auto mt-2 text-sm">
-							查看完整分析
+							{t('resumeAnalysis.viewDetails')}
 						</Button>
 					</div>
 				</DialogTrigger>
@@ -64,53 +66,54 @@ const ResumeAnalysis: React.FC<ResumeAnalysisProps> = ({
 				<DialogContent className="bg-gray-900 border-gray-700 text-gray-100 sm:max-w-[600px] md:max-w-[800px] lg:max-w-[1000px] p-0">
 					<DialogHeader className="p-6 border-b border-gray-700">
 						<DialogTitle className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-500">
-							详细简历分析
+							{t('resumeAnalysis.modalTitle')}
 						</DialogTitle>
 					</DialogHeader>
 
 					<div className="p-6 max-h-[70vh] overflow-y-auto">
 						<div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
 							<div className="md:col-span-1 bg-gray-800 p-4 rounded-lg">
-								<h4 className="text-lg font-semibold text-blue-400 mb-2">总分</h4>
+								<h4 className="text-lg font-semibold text-blue-400 mb-2">{t('resumeAnalysis.score')}</h4>
 								<div className="flex items-center justify-center">
 									<div className={`text-6xl font-bold ${getScoreColor(score)}`}>{score}</div>
 									<div className="text-2xl text-gray-400">/100</div>
 								</div>
 								<div className="w-full bg-gray-700 rounded-full h-2.5 mt-3">
 									<div
-										className={`h-2.5 rounded-full ${score >= 80 ? 'bg-green-500' : score >= 60 ? 'bg-yellow-500' : 'bg-red-500'
-											}`}
+										className={`h-2.5 rounded-full ${score >= 80 ? 'bg-green-500' : score >= 60 ? 'bg-yellow-500' : 'bg-red-500'}`}
 										style={{ width: `${score}%` }}
 									/>
 								</div>
 							</div>
 
 							<div className="md:col-span-2 bg-gray-800 p-4 rounded-lg">
-								<h4 className="text-lg font-semibold text-blue-400 mb-2">摘要</h4>
+								<h4 className="text-lg font-semibold text-blue-400 mb-2">{t('resumeAnalysis.summary')}</h4>
 								<p className="text-gray-300 text-sm mb-1">
-									<strong>详情：</strong> {details}
+									<strong>{t('resumeAnalysis.summaryLabel')}</strong> {details}
 								</p>
 								<p className="text-gray-300 text-sm">
-									<strong>评论：</strong> {commentary}
+									<strong>{t('resumeAnalysis.commentaryLabel')}</strong> {commentary}
 								</p>
 							</div>
 						</div>
 
 						<div>
-							<h4 className="text-xl font-semibold text-blue-400 mb-3">改进建议</h4>
+							<h4 className="text-xl font-semibold text-blue-400 mb-3">{t('resumeAnalysis.improvements')}</h4>
 							{improvements.length > 0 ? (
 								<ul className="space-y-3">
 									{improvements.map((item, idx) => (
 										<li key={idx} className="bg-gray-800 p-4 rounded-md shadow">
 											<p className="text-gray-200 text-sm">{item.suggestion}</p>
 											{item.lineNumber && (
-												<p className="text-xs text-gray-500 mt-1">参考位置：{item.lineNumber}</p>
+												<p className="text-xs text-gray-500 mt-1">
+													{t('resumeAnalysis.reference', { line: item.lineNumber })}
+												</p>
 											)}
 										</li>
 									))}
 								</ul>
 							) : (
-								<p className="text-gray-400 text-sm">目前没有具体的改进建议</p>
+								<p className="text-gray-400 text-sm">{t('resumeAnalysis.empty')}</p>
 							)}
 						</div>
 					</div>
@@ -118,7 +121,7 @@ const ResumeAnalysis: React.FC<ResumeAnalysisProps> = ({
 					<DialogFooter className="p-6 border-t border-gray-700">
 						<DialogClose asChild>
 							<Button variant="outline" className="text-gray-100 bg-gray-700 hover:bg-gray-600 border-gray-600">
-								关闭
+								{t('resumeAnalysis.close')}
 							</Button>
 						</DialogClose>
 					</DialogFooter>
