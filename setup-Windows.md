@@ -52,7 +52,14 @@ cd Resume-Matcher-CN
 2. 根据网络模式设置 npm、PyPI、uv 的下载源
 3. 复制根目录、后端、前端的 .env 示例文件
 4. 在后端创建虚拟环境，自动同步依赖（含 python-docx、pdfplumber 等）
-5. 安装前端依赖
+如果后端报错，尝试使用
+```bash
+cd apps/backend
+uv sync
+cd ../..
+```
+安装`python-docx`、`pdfplumber`依赖
+6. 安装前端依赖
 
 **English**
 The script auto-detects whether Chinese mirrors are reachable and switches both registry and language accordingly.
