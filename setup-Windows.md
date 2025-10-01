@@ -77,12 +77,12 @@ The script auto-detects whether Chinese mirrors are reachable and switches both 
 1. Check for Prerequisites Verify that Node.js, npm, Python, and pip are installed. The script will automatically install uv if it is not found.
 2. Configure Package Sources Set the download sources (mirrors/registries) for npm, PyPI, and uv based on the selected network profile.
 3. Set Up Environment Files Copy the .env.example files in the root, apps/backend, and apps/frontend directories to create your local .env files.
-4. Install Backend Dependencies Create a Python virtual environment for the backend and automatically sync all dependencies, including python-docx, pdfplumber, and others.
+4. Install Backend Dependencies Create a Python virtual environment for the backend and automatically sync all dependencies, including `python-docx`, `pdfplumber`, and others.
 If the backend installation fails with an error, try running the following commands manually:
-bash
+```bash
 cd apps/backend
 uv sync
-cd ../..
+cd ../..```
 5. Install Frontend Dependencies Install all required Node.js packages for the frontend application.
 
 ---
