@@ -1,0 +1,2 @@
+SUPPORTED_LOCALES = ('zh-CN', 'en-US')
+DEFAULT_LOCALE = 'zh-CN'

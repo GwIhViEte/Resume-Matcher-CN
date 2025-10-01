@@ -1,178 +1,373 @@
-# setup.ps1 - PowerShell setup script for Resume Matcher (OpenAI API version)
+﻿# setup.ps1 - PowerShell setup script for Resume Matcher
 
 [CmdletBinding()]
 param(
     [switch]$Help,
-    [switch]$StartDev
+    [switch]$StartDev,
+    [ValidateSet('auto', 'china', 'global')]
+    [string]$NetworkProfile = 'auto'
 )
 
 $ErrorActionPreference = "Stop"
 
-if ($Help) {
-    Write-Host @"
-Usage: .\setup.ps1 [-Help] [-StartDev]
+$script:Messages = @{
+    'global' = @{
+        Start = "Starting Resume Matcher setup..."
+        ForcedProfile = "Using forced network profile: {0}"
+        AutoDetect = "Auto-detecting network connectivity..."
+        Probe = "Probe {0} ({1}) => {2}"
+        AutoResult = "Auto-detect result: {0} profile (override with -NetworkProfile global|china)"
+        Registries = "Active registries -> npm: {0}, PyPI: {1}"
+        NodeMissing = "Node.js was not found. Please install Node.js v18+ first."
+        NodeOld = "Node.js version {0} is too old. v18+ is required."
+        NpmMissing = "npm was not found. Please install npm and retry."
+        NodeOk = "Node.js {0} detected"
+        NpmOk = "npm detected (registry {0})"
+        PythonMissing = "Python 3 was not found. Please install Python 3."
+        PythonOk = "Python detected via {0}"
+        PipMissing = "pip was not found. Please install pip."
+        PipOk = "pip detected (index {0})"
+        UvInstalling = "uv not found. Attempting automatic installation..."
+        Downloading = "Downloading installer: {0}"
+        DownloadFailed = "Failed: {0}. Trying next mirror..."
+        UvDownloadFail = "Unable to download uv installer. See https://docs.astral.sh/uv/ for manual steps."
+        UvInstallFail = "uv installation failed. Please install it manually: https://docs.astral.sh/uv/"
+        UvOk = "uv detected"
+        CopyEnv = "Copying {0} -> {1}"
+        EnvCreated = "{0} created. Please fill in the required secrets."
+        EnvExists = "{0} already exists"
+        InstallWorkspace = "Installing workspace npm dependencies"
+        CreateVenv = "Creating Python virtual environment (uv venv)"
+        SyncBackend = "Syncing backend Python dependencies via uv sync (index {0})"
+        InstallFrontend = "Installing frontend dependencies (npm install)"
+        Done = "Dependency installation completed"
+        Next = "Next steps:"
+        Next1 = "  1. Populate API credentials inside the generated .env files"
+        Next2 = "  2. Run 'npm run dev' to start the development servers"
+        Reachable = 'reachable'
+        Unreachable = 'unreachable'
+    }
+    'china' = @{
+        Start = "开始运行 Resume Matcher 安装脚本..."
+        ForcedProfile = "已选择网络模式：{0}"
+        AutoDetect = "正在自动探测网络可达性..."
+        Probe = "探测 {0} ({1}) => {2}"
+        AutoResult = "自动判定为：{0} 模式（可添加 -NetworkProfile global 或 china 手动覆盖）"
+        Registries = "当前使用的源 -> npm: {0}，PyPI: {1}"
+        NodeMissing = "未检测到 Node.js，请先安装 Node.js v18+"
+        NodeOld = "Node.js 版本 {0} 过低，需要 v18+"
+        NpmMissing = "未检测到 npm，请安装后重试"
+        NodeOk = "Node.js {0} 检测通过"
+        NpmOk = "npm 检测通过（源 {0}）"
+        PythonMissing = "未检测到 Python 3，请先安装"
+        PythonOk = "Python 检测通过，执行命令：{0}"
+        PipMissing = "未检测到 pip，请先安装"
+        PipOk = "pip 检测通过（索引 {0}）"
+        UvInstalling = "未检测到 uv，尝试自动安装..."
+        Downloading = "下载安装脚本：{0}"
+        DownloadFailed = "下载失败：{0}，尝试下一镜像..."
+        UvDownloadFail = "无法获取 uv 安装脚本，请参考 https://docs.astral.sh/uv/ 手动安装"
+        UvInstallFail = "uv 安装失败，请参考 https://docs.astral.sh/uv/ 手动安装"
+        UvOk = "uv 检测通过"
+        CopyEnv = "复制 {0} -> {1}"
+        EnvCreated = "已创建 {0}，请补充相关密钥"
+        EnvExists = "{0} 已存在"
+        InstallWorkspace = "安装仓库级 npm 依赖"
+        CreateVenv = "创建 Python 虚拟环境（uv venv）"
+        SyncBackend = "同步后端依赖（uv sync，PyPI 源 {0}）"
+        InstallFrontend = "安装前端依赖（npm install）"
+        Done = "依赖安装完成"
+        Next = "后续步骤："
+        Next1 = "  1. 在各 .env 中填入所需的 API Key"
+        Next2 = "  2. 运行 'npm run dev' 启动开发服务器"
+        Reachable = '可达'
+        Unreachable = '不可达'
+    }
+}
+
+$script:HelpTexts = @{
+    'global' = @"
+Usage: .\setup.ps1 [-Help] [-StartDev] [-NetworkProfile <auto|china|global>]
 
 Options:
-  -Help       显示此帮助消息并退出
-  -StartDev   安装完成后，启动开发服务器
+  -Help             Show this help and exit
+  -StartDev         Run 'npm run dev' after dependencies are installed
+  -NetworkProfile   Pick network mode: auto (default auto-detect), china (domestic mirrors), global (official registries)
 
+Steps performed:
+  1. Check Node.js / npm / Python / pip / uv
+  2. Configure registries according to the selected network profile
+  3. Copy .env example files (root, backend, frontend)
+  4. Create the backend virtual environment and install dependencies via uv
+  5. Install frontend dependencies
 
-这个仅限Windows的PowerShell脚本将：
-  - 验证所需工具：node、npm、python3、pip3、uv
-  - 通过npm安装根依赖项
-  - 引导根文件和后端/前端.env文件
-  - 设置后端Python venv并通过uv安装依赖项
-  - 通过npm安装前端依赖项
-
-核心依赖项：
-
+Prerequisites:
   - Node.js v18+
   - npm
   - Python 3
   - pip
-  - uv (will attempt auto-install via 国内镜像)
-
+  - uv (auto-install attempted when missing)
 "@
+    'china' = @"
+用法： .\setup.ps1 [-Help] [-StartDev] [-NetworkProfile <auto|china|global>]
+
+参数说明：
+  -Help             显示本帮助并退出
+  -StartDev         安装完成后自动执行 'npm run dev'
+  -NetworkProfile   网络模式：auto（自动探测）、china（国内镜像）、global（官方源）
+
+脚本流程：
+  1. 检查 Node.js / npm / Python / pip / uv
+  2. 根据网络模式切换 npm 与 PyPI 源
+  3. 复制根目录、后端、前端的 .env 示例
+  4. 创建后端虚拟环境并通过 uv 安装依赖
+  5. 安装前端依赖
+
+执行前请确保已安装：
+  - Node.js v18+
+  - npm
+  - Python 3
+  - pip
+  - uv（如缺失会尝试自动安装）
+"@
+}
+
+$script:ActiveMessages = $null
+
+try {
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+} catch {}
+
+function Write-Info {
+    param([string]$Message)
+    Write-Host "[*] $Message" -ForegroundColor Cyan
+}
+
+function Write-Success {
+    param([string]$Message)
+    Write-Host "[+] $Message" -ForegroundColor Green
+}
+
+function Write-CustomError {
+    param([string]$Message)
+    Write-Host "[x] $Message" -ForegroundColor Red
+    exit 1
+}
+
+function Test-Endpoint {
+    param(
+        [string]$Url,
+        [int]$TimeoutSec = 5
+    )
+
+    try {
+        Invoke-WebRequest -UseBasicParsing -Uri $Url -Method Head -TimeoutSec $TimeoutSec | Out-Null
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Resolve-NetworkProfile {
+    param([string]$RequestedProfile)
+
+    switch ($RequestedProfile) {
+        'china' {
+            Write-Info ($script:ActiveMessages.ForcedProfile -f 'china')
+            return 'china'
+        }
+        'global' {
+            Write-Info ($script:ActiveMessages.ForcedProfile -f 'global')
+            return 'global'
+        }
+        default {
+            Write-Info $script:ActiveMessages.AutoDetect
+            $chinaEndpoints = @(
+                @{ Name = 'TUNA PyPI'; Url = 'https://pypi.tuna.tsinghua.edu.cn/simple' },
+                @{ Name = 'npmmirror'; Url = 'https://registry.npmmirror.com' }
+            )
+
+            $allReachable = $true
+            foreach ($endpoint in $chinaEndpoints) {
+                $reachable = Test-Endpoint -Url $endpoint.Url -TimeoutSec 5
+                $statusLabel = if ($reachable) { $script:ActiveMessages.Reachable } else { $script:ActiveMessages.Unreachable }
+                Write-Info ($script:ActiveMessages.Probe -f $endpoint.Name, $endpoint.Url, $statusLabel)
+                if (-not $reachable) { $allReachable = $false }
+            }
+
+            if ($allReachable) {
+                Write-Info ($script:ActiveMessages.AutoResult -f 'china')
+                return 'china'
+            }
+
+            Write-Info ($script:ActiveMessages.AutoResult -f 'global')
+            return 'global'
+        }
+    }
+}
+
+function Apply-PackageMirrors {
+    param([string]$Profile)
+
+    switch ($Profile) {
+        'china' {
+            $script:NpmRegistry = 'https://registry.npmmirror.com'
+            $script:PipIndex = 'https://pypi.tuna.tsinghua.edu.cn/simple'
+            $script:UvIndex = $script:PipIndex
+        }
+        default {
+            $script:NpmRegistry = 'https://registry.npmjs.org'
+            $script:PipIndex = 'https://pypi.org/simple'
+            $script:UvIndex = $script:PipIndex
+        }
+    }
+
+    $env:NPM_CONFIG_REGISTRY = $script:NpmRegistry
+    $env:PIP_INDEX_URL = $script:PipIndex
+    $env:UV_INDEX_URL = $script:UvIndex
+
+    Write-Info ($script:ActiveMessages.Registries -f $script:NpmRegistry, $script:PipIndex)
+}
+
+if ($Help) {
+    $helpLocale = if ($NetworkProfile -eq 'china') { 'china' } else { 'global' }
+    Write-Host $script:HelpTexts[$helpLocale]
     exit 0
 }
 
-function Write-Info { param([string]$Message) Write-Host "ℹ  $Message" -ForegroundColor Cyan }
-function Write-Success { param([string]$Message) Write-Host "✔ $Message" -ForegroundColor Green }
-function Write-CustomError { param([string]$Message) Write-Host "✘ $Message" -ForegroundColor Red; exit 1 }
+$script:ActiveMessages = if ($NetworkProfile -eq 'china') { $script:Messages['china'] } else { $script:Messages['global'] }
+$resolvedProfile = Resolve-NetworkProfile -RequestedProfile $NetworkProfile
+$script:ActiveMessages = $script:Messages[$resolvedProfile]
 
+Write-Info $script:ActiveMessages.Start
+Apply-PackageMirrors -Profile $resolvedProfile
 
-Write-Info "启动Resume Matcher（OpenAI API 模式）设置..."
-
-# 为本进程使用国内镜像源（不修改全局配置）
-$env:NPM_CONFIG_REGISTRY = "https://registry.npmmirror.com"
-$env:PIP_INDEX_URL = "https://pypi.tuna.tsinghua.edu.cn/simple"
-# uv 在解析 PyPI 时也会读取 pip 的 index-url；同时设置 UV_INDEX_URL（若支持）
-$env:UV_INDEX_URL = $env:PIP_INDEX_URL
-
-Write-Info "本次安装使用国内镜像：npm=$env:NPM_CONFIG_REGISTRY, PyPI=$env:PIP_INDEX_URL"
-
-# 检查 Node.js
+# Node.js
 if (-not (Get-Command "node" -ErrorAction SilentlyContinue)) {
-    Write-CustomError "Node.js未安装，请安装Node.js v18+后重试"
-
+    Write-CustomError ($script:ActiveMessages.NodeMissing)
 }
-$Version = node --version
-$Major = [int]($Version -replace "^v(\d+).*", '\$1')
-if ($Major -lt 18) {
-    Write-CustomError "Node.js版本过低，需要v18+（当前 $Version）"
+$nodeVersion = node --version
+$nodeMajor = [int]($nodeVersion -replace '^v(\d+).*', '$1')
+if ($nodeMajor -lt 18) {
+    Write-CustomError ($script:ActiveMessages.NodeOld -f $nodeVersion)
 }
-Write-Success "Node.js $Version 检测通过"
+Write-Success ($script:ActiveMessages.NodeOk -f $nodeVersion)
 
-# 检查 npm
+# npm
 if (-not (Get-Command "npm" -ErrorAction SilentlyContinue)) {
-    Write-CustomError "npm未安装，请安装npm后重试"
+    Write-CustomError ($script:ActiveMessages.NpmMissing)
 }
-Write-Success "npm检测通过（使用国内镜像 $env:NPM_CONFIG_REGISTRY）"
+Write-Success ($script:ActiveMessages.NpmOk -f $script:NpmRegistry)
 
-# 检查 Python
+# Python
 $PythonCmd = if (Get-Command "python3" -ErrorAction SilentlyContinue) { "python3" } elseif (Get-Command "python" -ErrorAction SilentlyContinue) { "python" } else { $null }
-if (-not $PythonCmd) { Write-CustomError "未检测到Python 3，请安装 Python 3" }
-Write-Success "Python检测通过: $PythonCmd"
+if (-not $PythonCmd) {
+    Write-CustomError ($script:ActiveMessages.PythonMissing)
+}
+Write-Success ($script:ActiveMessages.PythonOk -f $PythonCmd)
 
-# 检查 pip
+# pip
 $PipCmd = if (Get-Command "pip3" -ErrorAction SilentlyContinue) { "pip3" } elseif (Get-Command "pip" -ErrorAction SilentlyContinue) { "pip" } else { $null }
-if (-not $PipCmd) { Write-CustomError "未检测到pip，请安装 pip" }
-Write-Success "pip检测通过: $PipCmd（使用国内镜像 $env:PIP_INDEX_URL）"
+if (-not $PipCmd) {
+    Write-CustomError ($script:ActiveMessages.PipMissing)
+}
+Write-Success ($script:ActiveMessages.PipOk -f $script:PipIndex)
 
-# 检查 uv（若不存在则用国内镜像安装）
+# uv (install when missing)
 if (-not (Get-Command "uv" -ErrorAction SilentlyContinue)) {
-    Write-Info "uv未检测到，尝试使用国内镜像安装..."
+    Write-Info ($script:ActiveMessages.UvInstalling)
 
-    # 候选安装脚本镜像（按顺序尝试）
-    $installerUrls = @(
-        "https://mirror.ghproxy.com/https://astral.sh/uv/install.ps1",
-        "https://ghproxy.com/https://astral.sh/uv/install.ps1",
-        "https://astral.sh/uv/install.ps1" # 最后回退官方
-    )
+    $installerUrls = if ($resolvedProfile -eq 'china') {
+        @(
+            'https://mirror.ghproxy.com/https://astral.sh/uv/install.ps1',
+            'https://ghproxy.com/https://astral.sh/uv/install.ps1',
+            'https://astral.sh/uv/install.ps1'
+        )
+    } else {
+        @('https://astral.sh/uv/install.ps1')
+    }
 
     $scriptContent = $null
-    foreach ($u in $installerUrls) {
+    foreach ($url in $installerUrls) {
         try {
-            Write-Info "获取安装脚本：$u"
-            $resp = Invoke-WebRequest -UseBasicParsing -Uri $u -TimeoutSec 30
+            Write-Info ($script:ActiveMessages.Downloading -f $url)
+            $resp = Invoke-WebRequest -UseBasicParsing -Uri $url -TimeoutSec 30
             if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300 -and $resp.Content) {
                 $scriptContent = $resp.Content
                 break
             }
         } catch {
-            Write-Info "获取失败：$($_.Exception.Message)，尝试下一个镜像..."
+            Write-Info ($script:ActiveMessages.DownloadFailed -f $_.Exception.Message)
         }
     }
 
     if (-not $scriptContent) {
-        Write-CustomError "无法获取 uv 安装脚本（镜像与官方均失败），请手动安装：https://docs.astral.sh/uv/"
+        Write-CustomError ($script:ActiveMessages.UvDownloadFail)
     }
 
-    # 将脚本内的 GitHub 资源域名重写为镜像加速
-    $scriptContent = $scriptContent `
-        -replace 'https://github.com', 'https://mirror.ghproxy.com/https://github.com' `
-        -replace 'https://objects.githubusercontent.com', 'https://mirror.ghproxy.com/https://objects.githubusercontent.com'
+    if ($resolvedProfile -eq 'china') {
+        $scriptContent = $scriptContent -replace 'https://github.com', 'https://mirror.ghproxy.com/https://github.com' -replace 'https://objects.githubusercontent.com', 'https://mirror.ghproxy.com/https://objects.githubusercontent.com'
+    }
 
-    # 执行安装脚本
     Invoke-Expression $scriptContent
-
-    # 更新 PATH（uv 默认安装到 %USERPROFILE%\.local\bin）
-    $env:PATH = "$env:USERPROFILE\.local\bin;$env:PATH"
+    $env:PATH = "${env:USERPROFILE}\.local\bin;${env:PATH}"
 }
 
 if (-not (Get-Command "uv" -ErrorAction SilentlyContinue)) {
-    Write-CustomError "uv 安装失败，请参考文档手动安装：https://docs.astral.sh/uv/"
+    Write-CustomError ($script:ActiveMessages.UvInstallFail)
 }
-Write-Success "uv 检测通过"
+Write-Success ($script:ActiveMessages.UvOk)
 
-# 初始化根目录 .env
+# Root .env
 if ((Test-Path ".env.example") -and (-not (Test-Path ".env"))) {
-    Write-Info "从 .env.example 创建根目录配置文件 .env"
+    Write-Info ($script:ActiveMessages.CopyEnv -f '.env.example', '.env')
     Copy-Item ".env.example" ".env"
-    Write-Success "根目录 .env 创建完成（请编辑填入 OPENAI_API_KEY）"
+    Write-Success ($script:ActiveMessages.EnvCreated -f 'root .env')
 } elseif (Test-Path ".env") {
-    Write-Info "根目录 .env 已存在"
+    Write-Info ($script:ActiveMessages.EnvExists -f 'root .env')
 }
 
-# 安装根依赖（使用国内 npm 源）
-Write-Info "安装根依赖（npm install）"
+# Root dependencies
+Write-Info ($script:ActiveMessages.InstallWorkspace)
 npm install
 
-# 后端环境
+# Backend setup
 if (Test-Path "apps/backend") {
     Push-Location "apps/backend"
+
     if ((Test-Path ".env.sample") -and (-not (Test-Path ".env"))) {
-        Write-Info "从 .env.sample 创建后端 .env"
+        Write-Info ($script:ActiveMessages.CopyEnv -f 'apps/backend/.env.sample', '.env')
         Copy-Item ".env.sample" ".env"
-        Write-Success "后端 .env 创建完成（请编辑填入 OPENAI_API_KEY）"
+        Write-Success ($script:ActiveMessages.EnvCreated -f 'backend .env')
     }
 
     if (-not (Test-Path ".venv")) {
-        Write-Info "创建 Python 虚拟环境（uv venv）"
+        Write-Info ($script:ActiveMessages.CreateVenv)
         uv venv
     }
-    Write-Info "同步 Python 依赖（uv sync，使用 PyPI 镜像 $env:PIP_INDEX_URL）"
+
+    Write-Info ($script:ActiveMessages.SyncBackend -f $script:PipIndex)
     uv sync
     Pop-Location
 }
 
-# 前端环境
+# Frontend setup
 if (Test-Path "apps/frontend") {
     Push-Location "apps/frontend"
     if ((Test-Path ".env.sample") -and (-not (Test-Path ".env"))) {
-        Write-Info "从 .env.sample 创建前端 .env"
+        Write-Info ($script:ActiveMessages.CopyEnv -f 'apps/frontend/.env.sample', '.env')
         Copy-Item ".env.sample" ".env"
-        Write-Success "前端 .env 创建完成"
+        Write-Success ($script:ActiveMessages.EnvCreated -f 'frontend .env')
     }
-    Write-Info "安装前端依赖（npm install）"
+    Write-Info ($script:ActiveMessages.InstallFrontend)
     npm install
     Pop-Location
 }
 
-Write-Success "✅ 安装完成！"
-Write-Host "下一步操作：" -ForegroundColor Yellow
-Write-Host "  1. 打开 .env 文件并填入你的OPENAI_API_KEY和URL" -ForegroundColor Yellow
-Write-Host "  2. 运行 'npm run dev' 启动开发模式" -ForegroundColor Yellow
+Write-Success ($script:ActiveMessages.Done)
+Write-Host ($script:ActiveMessages.Next) -ForegroundColor Yellow
+Write-Host ($script:ActiveMessages.Next1) -ForegroundColor Yellow
+Write-Host ($script:ActiveMessages.Next2) -ForegroundColor Yellow
 
 if ($StartDev) {
     npm run dev

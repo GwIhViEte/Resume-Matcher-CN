@@ -36,3 +36,5 @@ class ResumePreviewerModel(BaseModel):
     experience: List[ExperienceItem]
     education: List[EducationItem]
     skills: List[str]
+    content: Optional[str] = None
+    content_html: Optional[str] = None

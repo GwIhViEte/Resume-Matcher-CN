@@ -1,9 +1,13 @@
-import React from 'react';
+'use client';
+
 import Link from 'next/link';
 import BackgroundContainer from '@/components/common/background-container';
 import GitHubStarBadge from '@/components/common/github-star-badge';
+import { useI18n } from '@/components/common/language-provider';
 
 export default function Hero() {
+  const { t } = useI18n();
+
   return (
     <BackgroundContainer>
       <div className="mx-auto w-full max-w-6xl px-4 sm:px-6">
@@ -15,11 +19,11 @@ export default function Hero() {
           </div>
 
           <h1 className="text-center font-semibold tracking-tight leading-tight text-4xl sm:text-6xl lg:text-8xl bg-clip-text text-transparent bg-[linear-gradient(to_right,theme(colors.sky.500),theme(colors.pink.400),theme(colors.violet.600),theme(colors.blue.300),theme(colors.purple.400),theme(colors.pink.300),theme(colors.sky.500))] bg-[length:200%_auto] motion-safe:animate-[gradient_8s_linear_infinite]">
-            简历匹配器
+            {t('hero.title')}
           </h1>
 
           <p className="mt-4 md:mt-6 --font-space-grotesk text-center text-base sm:text-lg md:text-xl bg-gradient-to-br from-pink-400 via-blue-400 to-violet-600 bg-clip-text text-transparent">
-            定制完美简历，提升面试机会
+            {t('hero.subtitle')}
           </p>
 
           <div className="mt-6 md:mt-8">
@@ -29,7 +33,7 @@ export default function Hero() {
             >
               <span className="absolute inset-[-1000%] motion-safe:animate-[spin_2s_linear_infinite] bg-[conic-gradient(from_90deg_at_50%_50%,#3A59D1_0%,#7AC6D2_50%,#3A59D1_100%)]" />
               <span className="inline-flex h-full w-full cursor-pointer items-center justify-center rounded-full bg-slate-950 px-4 sm:px-5 py-1.5 text-sm sm:text-base font-medium text-gray-100 backdrop-blur-3xl">
-                立即开始
+                {t('hero.cta')}
                 <svg
                   width="16"
                   height="16"

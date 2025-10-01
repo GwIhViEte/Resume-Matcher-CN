@@ -1,7 +1,11 @@
+'use client';
+
 import Link from 'next/link';
+import { useI18n } from '@/components/common/language-provider';
 
 const GitHubStarBadge = () => {
 	const githubRepoUrl = 'https://github.com/GwIhViEte/Resume-Mather-CN';
+	const { t } = useI18n();
 
 	return (
 		<Link
@@ -37,7 +41,7 @@ const GitHubStarBadge = () => {
 						/>
 					</svg>
 
-					<span>在GitHub上为Resume-Matcher-CN加星</span>
+					<span>{t('github.badge.cta')}</span>
 
 					<svg
 						width="22"

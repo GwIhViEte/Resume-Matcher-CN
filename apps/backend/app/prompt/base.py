@@ -3,6 +3,7 @@ import importlib
 from typing import Dict
 
 from app.prompt import __path__ as prompt_pkg_path
+from app.i18n import DEFAULT_LOCALE
 
 
 class PromptFactory:
@@ -22,10 +23,17 @@ class PromptFactory:
     def list_prompts(self) -> Dict[str, str]:
         return self._prompts
 
-    def get(self, name: str) -> str:
+    def get(self, name: str, locale: str | None = None) -> str:
         try:
-            return self._prompts[name]
-        except KeyError:
+            prompt = self._prompts[name]
+        except KeyError as exc:  # noqa: TRY003
             raise KeyError(
                 f"Prompt '{name}' not found. Available prompts: {list(self._prompts.keys())}"
-            )
+            ) from exc
+
+        if isinstance(prompt, dict):
+            if locale and locale in prompt:
+                return prompt[locale]
+            return prompt.get(DEFAULT_LOCALE)
+
+        return prompt

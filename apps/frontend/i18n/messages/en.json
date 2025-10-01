@@ -1,0 +1,183 @@
+{
+  "language": {
+    "toggleLabel": "Interface Language",
+    "switchTo": "Switch to {{localeName}}",
+    "names": {
+      "zh-CN": "中文",
+      "en-US": "English"
+    }
+  },
+  "common": {
+    "action": {
+      "cancel": "Cancel",
+      "close": "Close",
+      "save": "Save",
+      "next": "Next",
+      "optimize": "Optimize",
+      "viewAnalysis": "View Full Analysis",
+      "upload": "Upload",
+      "removeFile": "Remove File"
+    },
+    "status": {
+      "uploaded": "Uploaded",
+      "uploading": "Uploading...",
+      "pending": "Awaiting upload",
+      "failed": "Upload failed",
+      "success": "Success"
+    }
+  },
+  "hero": {
+    "title": "Resume Matcher",
+    "subtitle": "Tailor a standout resume and boost interview invites",
+    "cta": "Get Started"
+  },
+  "github": {
+    "badge": {
+      "cta": "Star Resume-Matcher-CN on GitHub"
+    }
+  },
+  "jobModal": {
+    "title": "Paste Job Description",
+    "description": "Paste the complete job description text below.",
+    "placeholder": "Paste the job description here...",
+    "errorRequired": "Job description cannot be empty.",
+    "cancel": "Cancel",
+    "save": "Save Job Description",
+    "aria": {
+      "close": "Close dialog",
+      "textarea": "Job description input"
+    }
+  },
+  "jobListings": {
+    "heading": "Job Analyzer",
+    "intro": {
+      "analyzed": "Here are the details from the analyzed job.",
+      "empty": "Upload a job description to analyze its key information."
+    },
+    "analyzing": "Analyzing job description...",
+    "cta": {
+      "another": "Analyze another job description",
+      "upload": "Upload Job Description"
+    },
+    "empty": "No job descriptions have been analyzed yet.",
+    "log": {
+      "noResult": "Analysis returned no result.",
+      "error": "Error while analyzing job description:"
+    }
+  },
+  "resumeAnalysis": {
+    "heading": "Resume Analysis",
+    "viewDetails": "View Full Analysis",
+    "modalTitle": "Detailed Resume Analysis",
+    "score": "Score",
+    "summary": "Summary",
+    "summaryLabel": "Details:",
+    "commentaryLabel": "Commentary:",
+    "improvements": "Improvement Suggestions",
+    "reference": "Reference line: {{line}}",
+    "empty": "No additional improvement suggestions right now.",
+    "close": "Close"
+  },
+  "resumeCard": {
+    "contact": {
+      "email": "Email",
+      "phone": "Phone",
+      "location": "Location",
+      "website": "Website",
+      "linkedin": "LinkedIn",
+      "github": "GitHub"
+    },
+    "sections": {
+      "summary": "Summary",
+      "experience": "Experience",
+      "education": "Education",
+      "skills": "Skills"
+    }
+  },
+  "jobForm": {
+    "flash": {
+      "success": "Job description uploaded successfully!",
+      "empty": "Job description cannot be empty.",
+      "missingResume": "Resume ID is required."
+    },
+    "label": "Job description",
+    "placeholder": "Paste the job description here...",
+    "submit": {
+      "loading": "Submitting...",
+      "success": "Submitted!",
+      "default": "Next"
+    },
+    "optimize": {
+      "loading": "Improving...",
+      "cta": "Improve"
+    }
+  },
+  "onboarding": {
+    "resume": {
+      "title": "Upload Your Resume",
+      "guidelines": {
+        "title": "📌 Resume Requirements",
+        "required": "Required",
+        "requiredList": "Personal details (name, email, phone, location), target role/title, education history, work or internship experience",
+        "optional": "Optional",
+        "optionalList": "Projects, skills, research, achievements/awards, personal website, LinkedIn, GitHub"
+      },
+      "instructions": "Drag your resume below or click to browse. Supported formats: PDF, DOC, DOCX (max 2 MB)."
+    },
+    "jobs": {
+      "title": "Provide Job Descriptions",
+      "subtitle": "Paste up to three job descriptions below. We'll compare them with your resume to find the best match.",
+      "loading": "Loading input fields..."
+    }
+  },
+  "dashboard": {
+    "empty": "No improved resume found. Please click \"Improve\" on the job upload page first.",
+    "jobAnalysisNotImplemented": "Job analysis is not implemented yet.",
+    "heading": {
+      "prefix": "Your",
+      "highlight": "Resume Match",
+      "suffix": "Dashboard"
+    },
+    "description": "Manage your resume and see how well it aligns with each job description.",
+    "resumePanel": {
+      "title": "Updated Resume",
+      "caption": "This improved resume can be refreshed from the resume upload page."
+    }
+  },
+  "upload": {
+    "labels": {
+      "sectionTitle": "Upload Your Resume",
+      "fileArea": "File upload area. Drag files here or click to browse.",
+      "fileSelector": "Drag files here or click to choose (PDF, DOCX, max {{size}})",
+      "fileReady": "File ready",
+      "enterToken": "Enter a token to unlock premium models",
+      "promptToken": "Enter the token above",
+      "fileSelected": "A file is selected. Remove it to upload another.",
+      "selectModel": "Choose a model"
+    },
+    "feedback": {
+      "successPrefix": "Upload succeeded:",
+      "success": "{{fileName}} uploaded successfully!",
+      "successMissingId": "Upload succeeded, but no resume ID was returned.",
+      "errorPrefix": "Upload failed:",
+      "unknownError": "An unknown error occurred during upload."
+    },
+    "status": {
+      "uploaded": "Uploaded",
+      "failed": "Upload failed",
+      "pending": "Waiting to upload"
+    },
+    "errors": {
+      "tooLarge": "File \"{{fileName}}\" exceeds the maximum size of {{maxSize}}.",
+      "invalidFileObject": "Cannot upload \"{{fileName}}\"; the file object is invalid.",
+      "missingEndpoint": "Upload endpoint is not configured.",
+      "failedWithStatus": "Upload failed for \"{{fileName}}\" (status {{status}})."
+    }
+  },
+  "languageSwitcher": {
+    "tooltip": "Switch language"
+  },
+  "jobImprovement": {
+    "loading": "Loading input fields..."
+  }
+}

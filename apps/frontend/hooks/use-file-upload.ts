@@ -37,6 +37,7 @@ export type FileUploadOptions = {
   onUploadSuccess?: (uploadedFile: FileWithPreview, response: Record<string, unknown>) => void
   onUploadError?: (file: FileWithPreview, error: string) => void
   uploadUrl?: string // API endpoint for uploading
+  headers?: Record<string, string>
 }
 
 export type FileUploadState = {
@@ -87,6 +88,7 @@ export const useFileUpload = (
     onUploadSuccess,
     onUploadError,
     uploadUrl,
+    headers,
   } = options
 
   const [state, setState] = useState<FileUploadState>({
@@ -204,6 +206,7 @@ export const useFileUpload = (
       const response = await fetch(uploadUrl, {
         method: "POST",
         body: formData,
+        headers,
       })
 
       let responseData: Record<string, unknown> = {}; // Initialize for broader scope
