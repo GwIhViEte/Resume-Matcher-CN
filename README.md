@@ -42,7 +42,7 @@ npm run dev
 
 执行时脚本会根据网络连通性自动选择国内或官方源；如需手动指定，可传入 `-NetworkProfile china` 或 `-NetworkProfile global`。
 
-Windows用户查看[Windows安装文档](setup-Windows.md)。
+Windows用户查看[Windows安装文档](Setup-Windows.md)。
 
 Linux用户文档`待实现/编写`
 
