@@ -186,12 +186,12 @@ export default function FileUpload() {
 					<option value="gpt-4.1-mini">GPT-4.1-mini</option>
 					<option value="gpt-5-mini">GPT-5-mini</option>
 					<option value="gpt-5">GPT-5</option>
-					<option value="gpt-4o">GPT-4o</option>
 				</select>
 			</div>
 
 			{isPremiumModel && (
 				<div className="w-full">
+
 					<label htmlFor="token-input" className="block text-sm font-medium text-gray-300 mb-2">
 						{t('upload.labels.enterToken')}
 					</label>

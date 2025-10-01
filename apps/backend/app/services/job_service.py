@@ -23,6 +23,7 @@ PREMIUM_MODELS = ['gpt-4o']
 
 
 class JobService:
+
 	def __init__(self, db: AsyncSession, locale: str = DEFAULT_LOCALE):
 		self.db = db
 		self.locale = normalize_locale(locale)
@@ -175,3 +176,4 @@ def _load_nested_list(raw: Optional[str], key: str) -> Optional[List[Any]]:
 	except json.JSONDecodeError:
 		logger.error("Failed to load nested list for key %s", key)
 		return None
+

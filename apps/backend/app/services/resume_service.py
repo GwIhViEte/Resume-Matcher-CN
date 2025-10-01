@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 class ResumeService:
+
 	def __init__(self, db: AsyncSession, locale: str = DEFAULT_LOCALE):
 		self.db = db
 		self.locale = normalize_locale(locale)

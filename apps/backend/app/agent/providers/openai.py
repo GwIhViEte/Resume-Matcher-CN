@@ -17,6 +17,7 @@ class OpenAIProvider(Provider):
                  opts: Dict[str, Any] = None):
         if opts is None:
             opts = {}
+
         api_key_source = None
         if api_key:
             api_key_source = "argument"
@@ -31,6 +32,8 @@ class OpenAIProvider(Provider):
                     api_key_source = "environment"
 
         logger.info("Initialising OpenAI provider (key source: %s)", api_key_source or "unknown")
+
+
         if not api_key:
             raise ProviderError("OpenAI API key is missing")
         # Use the base_url from settings

@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 class ScoreImprovementService:
+
 	def __init__(self, db: AsyncSession, locale: str = DEFAULT_LOCALE, max_retries: int = 5):
 		self.db = db
 		self.locale = normalize_locale(locale)
