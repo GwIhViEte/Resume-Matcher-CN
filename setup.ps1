@@ -11,6 +11,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $script:DevServerPidFile = Join-Path $PSScriptRoot ".devserver.pid"
+$script:InterfaceLocale = 'global'
 
 $script:Messages = @{
     'global' = @{
@@ -272,6 +273,34 @@ function Ensure-BackendEnv {
     return $backendEnv
 }
 
+function Select-InterfaceLanguage {
+    while ($true) {
+        Write-Host ""
+        Write-Host "Select interface language / 选择脚本显示语言" -ForegroundColor Yellow
+        Write-Host "1) 简体中文"
+        Write-Host "2) English"
+        $choice = Read-Host "请输入编号 / Enter choice"
+
+        switch ($choice) {
+            '1' {
+                $script:InterfaceLocale = 'china'
+                $script:ActiveMessages = $script:Messages['china']
+                Clear-Host
+                return
+            }
+            '2' {
+                $script:InterfaceLocale = 'global'
+                $script:ActiveMessages = $script:Messages['global']
+                Clear-Host
+                return
+            }
+            default {
+                Write-Host "无效选项，请重新输入 / Invalid option, try again" -ForegroundColor Yellow
+            }
+        }
+    }
+}
+
 function Ensure-FrontendEnv {
     if (-not $script:ActiveMessages) {
         $script:ActiveMessages = $script:Messages['global']
@@ -292,6 +321,50 @@ function Ensure-FrontendEnv {
 
     Remove-Utf8Bom -FilePath $frontendEnv
     return $frontendEnv
+}
+
+function Pause-ForMenu {
+    if ($script:InterfaceLocale -eq 'china') {
+        [void](Read-Host "按回车返回菜单")
+    } else {
+        [void](Read-Host "Press Enter to return to menu")
+    }
+}
+
+function Confirm-Action {
+    param(
+        [string]$QuestionZh,
+        [string]$QuestionEn
+    )
+
+    while ($true) {
+        if ($script:InterfaceLocale -eq 'china') {
+            $answer = Read-Host "$QuestionZh (Y/N)"
+        } else {
+            $answer = Read-Host "$QuestionEn (Y/N)"
+        }
+
+        if ([string]::IsNullOrWhiteSpace($answer)) {
+            continue
+        }
+
+        switch ($answer.Trim().ToUpperInvariant()) {
+            'Y' { return $true }
+            'YES' { return $true }
+            '是' { return $true }
+            'S' { return $true }
+            'N' { return $false }
+            'NO' { return $false }
+            '否' { return $false }
+            default {
+                if ($script:InterfaceLocale -eq 'china') {
+                    Write-Host "请输入 Y 或 N" -ForegroundColor Yellow
+                } else {
+                    Write-Host "Please enter Y or N" -ForegroundColor Yellow
+                }
+            }
+        }
+    }
 }
 
 function Set-EnvEntry {
@@ -410,18 +483,33 @@ function Configure-ApiProvider {
 }
 
 function Invoke-ProviderMenu {
+    Clear-Host
     Write-Host ""
-    Write-Host "=== 模型提供商设置 ===" -ForegroundColor Yellow
-    Write-Host "1) 使用本地 Ollama"
-    Write-Host "2) 使用远程 API"
-    Write-Host "0) 返回主菜单"
-
-    $choice = Read-Host "请选择操作"
+    if ($script:InterfaceLocale -eq 'china') {
+        Write-Host "=== 模型提供商设置 ===" -ForegroundColor Yellow
+        Write-Host "1) 使用本地 Ollama"
+        Write-Host "2) 使用远程 API"
+        Write-Host "0) 返回主菜单"
+        $choice = Read-Host "请选择操作"
+    } else {
+        Write-Host "=== Model Provider Settings ===" -ForegroundColor Yellow
+        Write-Host "1) Use local Ollama"
+        Write-Host "2) Use remote API"
+        Write-Host "0) Return to main menu"
+        $choice = Read-Host "Select an option"
+    }
     switch ($choice) {
         '1' { Configure-OllamaProvider }
         '2' { Configure-ApiProvider }
-        default { Write-Info "已返回主菜单" }
+        default {
+            if ($script:InterfaceLocale -eq 'china') {
+                Write-Info "已返回主菜单"
+            } else {
+                Write-Info "Returning to main menu"
+            }
+        }
     }
+    Pause-ForMenu
 }
 
 function Invoke-UpdateCheck {
@@ -537,31 +625,68 @@ function Invoke-StopDevServers {
 
 function Show-MainMenu {
     while ($true) {
+        Clear-Host
         Write-Host ""
-        Write-Host "=== Resume Matcher 安装助手 ===" -ForegroundColor Yellow
-        Write-Host "1) 安装/修复依赖"
-        Write-Host "2) 检查仓库更新"
-        Write-Host "3) 更改模型提供商"
-        Write-Host "4) 启动开发服务器"
-        Write-Host "5) 停止开发服务器"
-        Write-Host "6) 卸载本地依赖"
-        Write-Host "0) 退出"
-
-        $choice = Read-Host "请选择操作"
+        if ($script:InterfaceLocale -eq 'china') {
+            Write-Host "=== Resume Matcher 安装助手 ===" -ForegroundColor Yellow
+            Write-Host "1) 安装/修复依赖"
+            Write-Host "2) 检查仓库更新"
+            Write-Host "3) 更改模型提供商"
+            Write-Host "4) 启动开发服务器"
+            Write-Host "5) 停止开发服务器"
+            Write-Host "6) 卸载本地依赖"
+            Write-Host "0) 退出"
+            $choice = Read-Host "请选择操作"
+        } else {
+            Write-Host "=== Resume Matcher Setup Assistant ===" -ForegroundColor Yellow
+            Write-Host "1) Install / Repair dependencies"
+            Write-Host "2) Check repository updates"
+            Write-Host "3) Change model provider"
+            Write-Host "4) Start dev servers"
+            Write-Host "5) Stop dev servers"
+            Write-Host "6) Uninstall local dependencies"
+            Write-Host "0) Exit"
+            $choice = Read-Host "Select an option"
+        }
 
         switch ($choice) {
             '1' {
-                $profileInput = Read-Host "选择网络模式 (auto/china/global，默认 auto)"
+                if ($script:InterfaceLocale -eq 'china') {
+                    $profileInput = Read-Host "选择网络模式 (auto/china/global，默认 auto)"
+                } else {
+                    $profileInput = Read-Host "Select network profile (auto/china/global, default auto)"
+                }
                 if ([string]::IsNullOrWhiteSpace($profileInput)) { $profileInput = 'auto' }
                 Invoke-Install -RequestedProfile $profileInput
+                Pause-ForMenu
             }
-            '2' { Invoke-UpdateCheck }
+            '2' {
+                $confirm = Confirm-Action "确认执行仓库更新检查？" "Run repository update check?"
+                if ($confirm) {
+                    Clear-Host
+                    Invoke-UpdateCheck
+                } else {
+                    if ($script:InterfaceLocale -eq 'china') {
+                        Write-Info "已取消仓库更新检查"
+                    } else {
+                        Write-Info "Update check cancelled"
+                    }
+                }
+                Pause-ForMenu
+            }
             '3' { Invoke-ProviderMenu }
-            '4' { Invoke-StartDevServers }
-            '5' { Invoke-StopDevServers }
-            '6' { Invoke-Uninstall }
+            '4' { Invoke-StartDevServers; Pause-ForMenu }
+            '5' { Invoke-StopDevServers; Pause-ForMenu }
+            '6' { Invoke-Uninstall; Pause-ForMenu }
             '0' { break }
-            default { Write-Info "无效选项，请重新输入" }
+            default {
+                if ($script:InterfaceLocale -eq 'china') {
+                    Write-Info "无效选项，请重新输入"
+                } else {
+                    Write-Info "Invalid option, please try again"
+                }
+                Pause-ForMenu
+            }
         }
     }
 }
@@ -716,5 +841,6 @@ $nonHelpParameters = $PSBoundParameters.Keys | Where-Object { $_ -ne 'Help' }
 if ($nonHelpParameters.Count -gt 0) {
     Invoke-Install -RequestedProfile $NetworkProfile -StartDev:$StartDev
 } else {
+    Select-InterfaceLanguage
     Show-MainMenu
 }
