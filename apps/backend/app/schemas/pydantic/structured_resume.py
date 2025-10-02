@@ -1,10 +1,21 @@
+import json
+
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class Location(BaseModel):
     city: str
     country: str
+
+    @field_validator("city", "country", mode="before")
+    @classmethod
+    def ensure_string(cls, value):
+        if value is None:
+            return ""
+        if isinstance(value, (list, dict)):
+            return json.dumps(value, ensure_ascii=False)
+        return str(value).strip()
 
 
 class PersonalData(BaseModel):
@@ -27,6 +38,26 @@ class Experience(BaseModel):
     technologies_used: Optional[List[str]] = Field(
         default_factory=list, alias="technologiesUsed"
     )
+
+    @field_validator("job_title", "company", "location", "start_date", "end_date", mode="before")
+    @classmethod
+    def ensure_string(cls, value):
+        if value is None:
+            return ""
+        if isinstance(value, (list, dict)):
+            return json.dumps(value, ensure_ascii=False)
+        return str(value).strip()
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def ensure_description_list(cls, value):
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value.strip()] if value.strip() else []
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        return [str(value).strip()]
 
 
 class Project(BaseModel):

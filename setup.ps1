@@ -10,6 +10,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$script:DevServerPidFile = Join-Path $PSScriptRoot ".devserver.pid"
+
 $script:Messages = @{
     'global' = @{
         Start = "Starting Resume Matcher setup..."
@@ -229,146 +231,490 @@ function Apply-PackageMirrors {
     Write-Info ($script:ActiveMessages.Registries -f $script:NpmRegistry, $script:PipIndex)
 }
 
-if ($Help) {
-    $helpLocale = if ($NetworkProfile -eq 'china') { 'china' } else { 'global' }
-    Write-Host $script:HelpTexts[$helpLocale]
-    exit 0
-}
+function Remove-Utf8Bom {
+    param([string]$FilePath)
 
-$script:ActiveMessages = if ($NetworkProfile -eq 'china') { $script:Messages['china'] } else { $script:Messages['global'] }
-$resolvedProfile = Resolve-NetworkProfile -RequestedProfile $NetworkProfile
-$script:ActiveMessages = $script:Messages[$resolvedProfile]
-
-Write-Info $script:ActiveMessages.Start
-Apply-PackageMirrors -Profile $resolvedProfile
-
-# Node.js
-if (-not (Get-Command "node" -ErrorAction SilentlyContinue)) {
-    Write-CustomError ($script:ActiveMessages.NodeMissing)
-}
-$nodeVersion = node --version
-$nodeMajor = [int]($nodeVersion -replace '^v(\d+).*', '$1')
-if ($nodeMajor -lt 18) {
-    Write-CustomError ($script:ActiveMessages.NodeOld -f $nodeVersion)
-}
-Write-Success ($script:ActiveMessages.NodeOk -f $nodeVersion)
-
-# npm
-if (-not (Get-Command "npm" -ErrorAction SilentlyContinue)) {
-    Write-CustomError ($script:ActiveMessages.NpmMissing)
-}
-Write-Success ($script:ActiveMessages.NpmOk -f $script:NpmRegistry)
-
-# Python
-$PythonCmd = if (Get-Command "python3" -ErrorAction SilentlyContinue) { "python3" } elseif (Get-Command "python" -ErrorAction SilentlyContinue) { "python" } else { $null }
-if (-not $PythonCmd) {
-    Write-CustomError ($script:ActiveMessages.PythonMissing)
-}
-Write-Success ($script:ActiveMessages.PythonOk -f $PythonCmd)
-
-# pip
-$PipCmd = if (Get-Command "pip3" -ErrorAction SilentlyContinue) { "pip3" } elseif (Get-Command "pip" -ErrorAction SilentlyContinue) { "pip" } else { $null }
-if (-not $PipCmd) {
-    Write-CustomError ($script:ActiveMessages.PipMissing)
-}
-Write-Success ($script:ActiveMessages.PipOk -f $script:PipIndex)
-
-# uv (install when missing)
-if (-not (Get-Command "uv" -ErrorAction SilentlyContinue)) {
-    Write-Info ($script:ActiveMessages.UvInstalling)
-
-    $installerUrls = if ($resolvedProfile -eq 'china') {
-        @(
-            'https://mirror.ghproxy.com/https://astral.sh/uv/install.ps1',
-            'https://ghproxy.com/https://astral.sh/uv/install.ps1',
-            'https://astral.sh/uv/install.ps1'
-        )
-    } else {
-        @('https://astral.sh/uv/install.ps1')
+    if (-not (Test-Path $FilePath)) {
+        return
     }
 
-    $scriptContent = $null
-    foreach ($url in $installerUrls) {
-        try {
-            Write-Info ($script:ActiveMessages.Downloading -f $url)
-            $resp = Invoke-WebRequest -UseBasicParsing -Uri $url -TimeoutSec 30
-            if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300 -and $resp.Content) {
-                $scriptContent = $resp.Content
-                break
-            }
-        } catch {
-            Write-Info ($script:ActiveMessages.DownloadFailed -f $_.Exception.Message)
+    try {
+        $bytes = [System.IO.File]::ReadAllBytes($FilePath)
+        if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+            $encoding = New-Object System.Text.UTF8Encoding($false)
+            $content = $encoding.GetString($bytes, 3, $bytes.Length - 3)
+            [System.IO.File]::WriteAllText($FilePath, $content, $encoding)
         }
+    } catch {
+        Write-Info "处理 $FilePath 的 BOM 时出现问题：$($_.Exception.Message)"
     }
-
-    if (-not $scriptContent) {
-        Write-CustomError ($script:ActiveMessages.UvDownloadFail)
-    }
-
-    if ($resolvedProfile -eq 'china') {
-        $scriptContent = $scriptContent -replace 'https://github.com', 'https://mirror.ghproxy.com/https://github.com' -replace 'https://objects.githubusercontent.com', 'https://mirror.ghproxy.com/https://objects.githubusercontent.com'
-    }
-
-    Invoke-Expression $scriptContent
-    $env:PATH = "${env:USERPROFILE}\.local\bin;${env:PATH}"
 }
 
-if (-not (Get-Command "uv" -ErrorAction SilentlyContinue)) {
-    Write-CustomError ($script:ActiveMessages.UvInstallFail)
-}
-Write-Success ($script:ActiveMessages.UvOk)
+function Ensure-BackendEnv {
+    if (-not $script:ActiveMessages) {
+        $script:ActiveMessages = $script:Messages['global']
+    }
 
-# Root .env
-if ((Test-Path ".env.example") -and (-not (Test-Path ".env"))) {
-    Write-Info ($script:ActiveMessages.CopyEnv -f '.env.example', '.env')
-    Copy-Item ".env.example" ".env"
-    Write-Success ($script:ActiveMessages.EnvCreated -f 'root .env')
-} elseif (Test-Path ".env") {
-    Write-Info ($script:ActiveMessages.EnvExists -f 'root .env')
-}
+    $backendEnv = Join-Path $PSScriptRoot "apps/backend/.env"
+    $backendSample = Join-Path $PSScriptRoot "apps/backend/.env.sample"
 
-# Root dependencies
-Write-Info ($script:ActiveMessages.InstallWorkspace)
-npm install
-
-# Backend setup
-if (Test-Path "apps/backend") {
-    Push-Location "apps/backend"
-
-    if ((Test-Path ".env.sample") -and (-not (Test-Path ".env"))) {
-        Write-Info ($script:ActiveMessages.CopyEnv -f 'apps/backend/.env.sample', '.env')
-        Copy-Item ".env.sample" ".env"
+    if (-not (Test-Path $backendEnv)) {
+        if (Test-Path $backendSample) {
+            Write-Info ($script:ActiveMessages.CopyEnv -f 'apps/backend/.env.sample', 'apps/backend/.env')
+            Copy-Item -Path $backendSample -Destination $backendEnv
+        } else {
+            New-Item -Path $backendEnv -ItemType File | Out-Null
+        }
         Write-Success ($script:ActiveMessages.EnvCreated -f 'backend .env')
     }
 
-    if (-not (Test-Path ".venv")) {
-        Write-Info ($script:ActiveMessages.CreateVenv)
-        uv venv
-    }
-
-    Write-Info ($script:ActiveMessages.SyncBackend -f $script:PipIndex)
-    uv sync
-    Pop-Location
+    Remove-Utf8Bom -FilePath $backendEnv
+    return $backendEnv
 }
 
-# Frontend setup
-if (Test-Path "apps/frontend") {
-    Push-Location "apps/frontend"
-    if ((Test-Path ".env.sample") -and (-not (Test-Path ".env"))) {
-        Write-Info ($script:ActiveMessages.CopyEnv -f 'apps/frontend/.env.sample', '.env')
-        Copy-Item ".env.sample" ".env"
+function Ensure-FrontendEnv {
+    if (-not $script:ActiveMessages) {
+        $script:ActiveMessages = $script:Messages['global']
+    }
+
+    $frontendEnv = Join-Path $PSScriptRoot "apps/frontend/.env"
+    $frontendSample = Join-Path $PSScriptRoot "apps/frontend/.env.sample"
+
+    if (-not (Test-Path $frontendEnv)) {
+        if (Test-Path $frontendSample) {
+            Write-Info ($script:ActiveMessages.CopyEnv -f 'apps/frontend/.env.sample', 'apps/frontend/.env')
+            Copy-Item -Path $frontendSample -Destination $frontendEnv
+        } else {
+            New-Item -Path $frontendEnv -ItemType File | Out-Null
+        }
         Write-Success ($script:ActiveMessages.EnvCreated -f 'frontend .env')
     }
-    Write-Info ($script:ActiveMessages.InstallFrontend)
-    npm install
-    Pop-Location
+
+    Remove-Utf8Bom -FilePath $frontendEnv
+    return $frontendEnv
 }
 
-Write-Success ($script:ActiveMessages.Done)
-Write-Host ($script:ActiveMessages.Next) -ForegroundColor Yellow
-Write-Host ($script:ActiveMessages.Next1) -ForegroundColor Yellow
-Write-Host ($script:ActiveMessages.Next2) -ForegroundColor Yellow
+function Set-EnvEntry {
+    param(
+        [string]$FilePath,
+        [string]$Key,
+        [string]$Value
+    )
 
-if ($StartDev) {
-    npm run dev
+    $normalizedValue = if ($null -eq $Value) { '' } else { [string]$Value }
+    $escapedValue = $normalizedValue -replace '"', '""'
+    $formattedLine = '{0}="{1}"' -f $Key, $escapedValue
+
+    $existingLines = @()
+    if (Test-Path $FilePath) {
+        $existingLines = [System.IO.File]::ReadAllLines($FilePath)
+        if ($existingLines.Length -gt 0) {
+            $existingLines[0] = $existingLines[0] -replace "^[\uFEFF]", ''
+        }
+    }
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($line in $existingLines) {
+        [void]$lines.Add($line)
+    }
+
+    $updated = $false
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match "^\s*$Key\s*=") {
+            $lines[$i] = $formattedLine
+            $updated = $true
+            break
+        }
+    }
+
+    if (-not $updated) {
+        [void]$lines.Add($formattedLine)
+    }
+
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllLines($FilePath, $lines.ToArray(), $encoding)
+}
+
+function Configure-OllamaProvider {
+    Write-Info "配置本地 Ollama 模型提供商"
+    $envPath = Ensure-BackendEnv
+
+    $defaultLLModel = 'gemma3:4b'
+    $defaultEmbeddingModel = 'nomic-embed-text:latest'
+
+    $llModelInput = Read-Host "请输入对话模型名称 (默认 $defaultLLModel)"
+    if ([string]::IsNullOrWhiteSpace($llModelInput)) { $llModelInput = $defaultLLModel }
+
+    $embeddingModelInput = Read-Host "请输入向量模型名称 (默认 $defaultEmbeddingModel)"
+    if ([string]::IsNullOrWhiteSpace($embeddingModelInput)) { $embeddingModelInput = $defaultEmbeddingModel }
+
+    Set-EnvEntry -FilePath $envPath -Key 'LLM_PROVIDER' -Value 'ollama'
+    Set-EnvEntry -FilePath $envPath -Key 'LLM_BASE_URL' -Value 'http://127.0.0.1:11434'
+    Set-EnvEntry -FilePath $envPath -Key 'LLM_API_KEY' -Value ''
+    Set-EnvEntry -FilePath $envPath -Key 'LL_MODEL' -Value $llModelInput
+
+    Set-EnvEntry -FilePath $envPath -Key 'EMBEDDING_PROVIDER' -Value 'ollama'
+    Set-EnvEntry -FilePath $envPath -Key 'EMBEDDING_BASE_URL' -Value 'http://127.0.0.1:11434'
+    Set-EnvEntry -FilePath $envPath -Key 'EMBEDDING_API_KEY' -Value ''
+    Set-EnvEntry -FilePath $envPath -Key 'EMBEDDING_MODEL' -Value $embeddingModelInput
+
+    $frontendEnvPath = Ensure-FrontendEnv
+    Set-EnvEntry -FilePath $frontendEnvPath -Key 'NEXT_PUBLIC_LLM_PROVIDER' -Value 'ollama'
+    Set-EnvEntry -FilePath $frontendEnvPath -Key 'NEXT_PUBLIC_DEFAULT_MODEL' -Value $llModelInput
+    Set-EnvEntry -FilePath $frontendEnvPath -Key 'NEXT_PUBLIC_MODEL_SELECTION' -Value 'disabled'
+
+    Write-Success "已切换为本地 Ollama 配置"
+}
+
+function Configure-ApiProvider {
+    Write-Info "配置远程 API 模型提供商"
+    $envPath = Ensure-BackendEnv
+
+    $defaultProvider = 'openai'
+    $providerInput = Read-Host "请输入提供商标识 (默认 $defaultProvider)"
+    if ([string]::IsNullOrWhiteSpace($providerInput)) { $providerInput = $defaultProvider }
+
+    $defaultBaseUrl = 'https://api.openai.com/v1'
+    $baseUrlInput = Read-Host "请输入 API Base URL (默认 $defaultBaseUrl)"
+    if ([string]::IsNullOrWhiteSpace($baseUrlInput)) { $baseUrlInput = $defaultBaseUrl }
+
+    $defaultLLModel = 'gpt-4.1'
+    $llModelInput = Read-Host "请输入对话模型名称 (默认 $defaultLLModel)"
+    if ([string]::IsNullOrWhiteSpace($llModelInput)) { $llModelInput = $defaultLLModel }
+
+    $defaultEmbeddingModel = 'text-embedding-3-large'
+    $embeddingModelInput = Read-Host "请输入向量模型名称 (默认 $defaultEmbeddingModel)"
+    if ([string]::IsNullOrWhiteSpace($embeddingModelInput)) { $embeddingModelInput = $defaultEmbeddingModel }
+
+    $apiKeyInput = Read-Host "请输入 API Key (回车保留现有值)"
+
+    Set-EnvEntry -FilePath $envPath -Key 'LLM_PROVIDER' -Value $providerInput
+    Set-EnvEntry -FilePath $envPath -Key 'LLM_BASE_URL' -Value $baseUrlInput
+    Set-EnvEntry -FilePath $envPath -Key 'LL_MODEL' -Value $llModelInput
+
+    Set-EnvEntry -FilePath $envPath -Key 'EMBEDDING_PROVIDER' -Value $providerInput
+    Set-EnvEntry -FilePath $envPath -Key 'EMBEDDING_BASE_URL' -Value $baseUrlInput
+    Set-EnvEntry -FilePath $envPath -Key 'EMBEDDING_MODEL' -Value $embeddingModelInput
+
+    if (-not [string]::IsNullOrWhiteSpace($apiKeyInput)) {
+        Set-EnvEntry -FilePath $envPath -Key 'LLM_API_KEY' -Value $apiKeyInput
+        Set-EnvEntry -FilePath $envPath -Key 'EMBEDDING_API_KEY' -Value $apiKeyInput
+    }
+
+    $frontendEnvPath = Ensure-FrontendEnv
+    Set-EnvEntry -FilePath $frontendEnvPath -Key 'NEXT_PUBLIC_LLM_PROVIDER' -Value $providerInput
+    Set-EnvEntry -FilePath $frontendEnvPath -Key 'NEXT_PUBLIC_DEFAULT_MODEL' -Value $llModelInput
+    Set-EnvEntry -FilePath $frontendEnvPath -Key 'NEXT_PUBLIC_MODEL_SELECTION' -Value 'enabled'
+
+    Write-Success "已切换为远程 API 配置"
+}
+
+function Invoke-ProviderMenu {
+    Write-Host ""
+    Write-Host "=== 模型提供商设置 ===" -ForegroundColor Yellow
+    Write-Host "1) 使用本地 Ollama"
+    Write-Host "2) 使用远程 API"
+    Write-Host "0) 返回主菜单"
+
+    $choice = Read-Host "请选择操作"
+    switch ($choice) {
+        '1' { Configure-OllamaProvider }
+        '2' { Configure-ApiProvider }
+        default { Write-Info "已返回主菜单" }
+    }
+}
+
+function Invoke-UpdateCheck {
+    if (-not (Get-Command "git" -ErrorAction SilentlyContinue)) {
+        Write-Info "未检测到 git，请先安装 Git。"
+        return
+    }
+
+    Write-Info "同步远程仓库引用..."
+    git fetch --all --prune
+    Write-Success "远程引用已更新"
+
+    $currentBranch = (git rev-parse --abbrev-ref HEAD).Trim()
+    Write-Info "当前分支：$currentBranch"
+
+    Write-Host "--- git status -sb ---" -ForegroundColor Yellow
+    git status -sb
+
+    Write-Host "--- 与 origin/$currentBranch 的最近差异 ---" -ForegroundColor Yellow
+    git log --oneline --decorate --max-count 5 "HEAD..origin/$currentBranch"
+}
+
+function Invoke-Uninstall {
+    $targets = @(
+        (Join-Path -Path $PSScriptRoot -ChildPath "node_modules"),
+        (Join-Path -Path $PSScriptRoot -ChildPath "apps/frontend/node_modules"),
+        (Join-Path -Path $PSScriptRoot -ChildPath "apps/backend/.venv")
+    )
+
+    $existingTargets = $targets | Where-Object { Test-Path $_ }
+    if ($existingTargets.Count -eq 0) {
+        Write-Info "未找到需要清理的依赖目录。"
+        return
+    }
+
+    Write-Host "以下目录将被删除：" -ForegroundColor Yellow
+    foreach ($target in $existingTargets) {
+        Write-Host "  - $target"
+    }
+
+    $confirmation = Read-Host "请输入 YES 确认删除"
+    if ($confirmation.ToUpperInvariant() -ne 'YES') {
+        Write-Info "已取消卸载操作"
+        return
+    }
+
+    foreach ($target in $existingTargets) {
+        try {
+            Remove-Item -Path $target -Recurse -Force
+            Write-Success "已删除 $target"
+        } catch {
+            Write-Info "删除 $target 时出现问题：$($_.Exception.Message)"
+        }
+    }
+}
+
+function Get-HostShellPath {
+    try {
+        return (Get-Process -Id $PID).Path
+    } catch {
+        return (Join-Path $PSHOME 'pwsh.exe')
+    }
+}
+
+function Invoke-StartDevServers {
+    Ensure-BackendEnv | Out-Null
+
+    if (Test-Path $script:DevServerPidFile) {
+        $existingPid = Get-Content -Path $script:DevServerPidFile | Select-Object -First 1
+        if ($existingPid -and (Get-Process -Id $existingPid -ErrorAction SilentlyContinue)) {
+            Write-Info "开发服务器已在运行 (PID $existingPid)"
+            return
+        }
+        Remove-Item -Path $script:DevServerPidFile -ErrorAction SilentlyContinue
+    }
+
+    $shellPath = Get-HostShellPath
+    $startCommand = "Set-Location `"$PSScriptRoot`"; npm run dev"
+    try {
+        $process = Start-Process -FilePath $shellPath -ArgumentList '-NoExit', '-Command', $startCommand -PassThru
+        Set-Content -Path $script:DevServerPidFile -Value $process.Id -Encoding UTF8
+        Write-Success "已在新终端启动开发服务器 (PID $($process.Id))"
+        Write-Info "关闭该终端或使用菜单的停止选项即可终止服务"
+    } catch {
+        Write-Info "启动开发服务器失败：$($_.Exception.Message)"
+    }
+}
+
+function Invoke-StopDevServers {
+    if (-not (Test-Path $script:DevServerPidFile)) {
+        Write-Info "未记录正在运行的开发服务器"
+        return
+    }
+
+    $pidContent = Get-Content -Path $script:DevServerPidFile | Select-Object -First 1
+    $parsedPid = 0
+    if (-not [int]::TryParse($pidContent, [ref]$parsedPid)) {
+        Remove-Item -Path $script:DevServerPidFile -ErrorAction SilentlyContinue
+        Write-Info "PID 信息已失效，已清理记录"
+        return
+    }
+
+    $pidValue = $parsedPid
+    try {
+        Stop-Process -Id $pidValue -ErrorAction Stop
+        Write-Success "已停止开发服务器 (PID $pidValue)"
+    } catch {
+        Write-Info "停止进程时出现问题：$($_.Exception.Message)"
+    }
+
+    Remove-Item -Path $script:DevServerPidFile -ErrorAction SilentlyContinue
+}
+
+function Show-MainMenu {
+    while ($true) {
+        Write-Host ""
+        Write-Host "=== Resume Matcher 安装助手 ===" -ForegroundColor Yellow
+        Write-Host "1) 安装/修复依赖"
+        Write-Host "2) 检查仓库更新"
+        Write-Host "3) 更改模型提供商"
+        Write-Host "4) 启动开发服务器"
+        Write-Host "5) 停止开发服务器"
+        Write-Host "6) 卸载本地依赖"
+        Write-Host "0) 退出"
+
+        $choice = Read-Host "请选择操作"
+
+        switch ($choice) {
+            '1' {
+                $profileInput = Read-Host "选择网络模式 (auto/china/global，默认 auto)"
+                if ([string]::IsNullOrWhiteSpace($profileInput)) { $profileInput = 'auto' }
+                Invoke-Install -RequestedProfile $profileInput
+            }
+            '2' { Invoke-UpdateCheck }
+            '3' { Invoke-ProviderMenu }
+            '4' { Invoke-StartDevServers }
+            '5' { Invoke-StopDevServers }
+            '6' { Invoke-Uninstall }
+            '0' { break }
+            default { Write-Info "无效选项，请重新输入" }
+        }
+    }
+}
+
+function Invoke-Install {
+    param(
+        [string]$RequestedProfile = 'auto',
+        [switch]$StartDev
+    )
+
+    $initialLocale = if ($RequestedProfile -eq 'china') { 'china' } else { 'global' }
+    $script:ActiveMessages = $script:Messages[$initialLocale]
+
+    $resolvedProfile = Resolve-NetworkProfile -RequestedProfile $RequestedProfile
+    $script:ActiveMessages = $script:Messages[$resolvedProfile]
+
+    Write-Info $script:ActiveMessages.Start
+    Apply-PackageMirrors -Profile $resolvedProfile
+
+    if (-not (Get-Command "node" -ErrorAction SilentlyContinue)) {
+        Write-CustomError ($script:ActiveMessages.NodeMissing)
+    }
+    $nodeVersion = node --version
+    $nodeMajor = [int]($nodeVersion -replace '^v(\d+).*', '$1')
+    if ($nodeMajor -lt 18) {
+        Write-CustomError ($script:ActiveMessages.NodeOld -f $nodeVersion)
+    }
+    Write-Success ($script:ActiveMessages.NodeOk -f $nodeVersion)
+
+    if (-not (Get-Command "npm" -ErrorAction SilentlyContinue)) {
+        Write-CustomError ($script:ActiveMessages.NpmMissing)
+    }
+    Write-Success ($script:ActiveMessages.NpmOk -f $script:NpmRegistry)
+
+    $PythonCmd = if (Get-Command "python3" -ErrorAction SilentlyContinue) { "python3" } elseif (Get-Command "python" -ErrorAction SilentlyContinue) { "python" } else { $null }
+    if (-not $PythonCmd) {
+        Write-CustomError ($script:ActiveMessages.PythonMissing)
+    }
+    Write-Success ($script:ActiveMessages.PythonOk -f $PythonCmd)
+
+    $PipCmd = if (Get-Command "pip3" -ErrorAction SilentlyContinue) { "pip3" } elseif (Get-Command "pip" -ErrorAction SilentlyContinue) { "pip" } else { $null }
+    if (-not $PipCmd) {
+        Write-CustomError ($script:ActiveMessages.PipMissing)
+    }
+    Write-Success ($script:ActiveMessages.PipOk -f $script:PipIndex)
+
+    if (-not (Get-Command "uv" -ErrorAction SilentlyContinue)) {
+        Write-Info ($script:ActiveMessages.UvInstalling)
+
+        $installerUrls = if ($resolvedProfile -eq 'china') {
+            @(
+                'https://mirror.ghproxy.com/https://astral.sh/uv/install.ps1',
+                'https://ghproxy.com/https://astral.sh/uv/install.ps1',
+                'https://astral.sh/uv/install.ps1'
+            )
+        } else {
+            @('https://astral.sh/uv/install.ps1')
+        }
+
+        $scriptContent = $null
+        foreach ($url in $installerUrls) {
+            try {
+                Write-Info ($script:ActiveMessages.Downloading -f $url)
+                $resp = Invoke-WebRequest -UseBasicParsing -Uri $url -TimeoutSec 30
+                if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300 -and $resp.Content) {
+                    $scriptContent = $resp.Content
+                    break
+                }
+            } catch {
+                Write-Info ($script:ActiveMessages.DownloadFailed -f $_.Exception.Message)
+            }
+        }
+
+        if (-not $scriptContent) {
+            Write-CustomError ($script:ActiveMessages.UvDownloadFail)
+        }
+
+        if ($resolvedProfile -eq 'china') {
+            $scriptContent = $scriptContent -replace 'https://github.com', 'https://mirror.ghproxy.com/https://github.com' -replace 'https://objects.githubusercontent.com', 'https://mirror.ghproxy.com/https://objects.githubusercontent.com'
+        }
+
+        Invoke-Expression $scriptContent
+        $env:PATH = "${env:USERPROFILE}\.local\bin;${env:PATH}"
+    }
+
+    if (-not (Get-Command "uv" -ErrorAction SilentlyContinue)) {
+        Write-CustomError ($script:ActiveMessages.UvInstallFail)
+    }
+    Write-Success ($script:ActiveMessages.UvOk)
+
+    $rootEnvPath = Join-Path -Path $PSScriptRoot -ChildPath ".env"
+    $rootEnvExample = Join-Path -Path $PSScriptRoot -ChildPath ".env.example"
+    if ((Test-Path $rootEnvExample) -and (-not (Test-Path $rootEnvPath))) {
+        Write-Info ($script:ActiveMessages.CopyEnv -f '.env.example', '.env')
+        Copy-Item $rootEnvExample $rootEnvPath
+        Write-Success ($script:ActiveMessages.EnvCreated -f 'root .env')
+    } elseif (Test-Path $rootEnvPath) {
+        Write-Info ($script:ActiveMessages.EnvExists -f 'root .env')
+    }
+    Remove-Utf8Bom -FilePath $rootEnvPath
+
+    Write-Info ($script:ActiveMessages.InstallWorkspace)
+    npm install
+
+    if (Test-Path "apps/backend") {
+        Push-Location "apps/backend"
+
+        $backendEnvPath = Join-Path -Path (Get-Location).Path -ChildPath ".env"
+        if ((Test-Path ".env.sample") -and (-not (Test-Path $backendEnvPath))) {
+            Write-Info ($script:ActiveMessages.CopyEnv -f 'apps/backend/.env.sample', '.env')
+            Copy-Item ".env.sample" $backendEnvPath
+            Write-Success ($script:ActiveMessages.EnvCreated -f 'backend .env')
+        }
+        Remove-Utf8Bom -FilePath $backendEnvPath
+
+        if (-not (Test-Path ".venv")) {
+            Write-Info ($script:ActiveMessages.CreateVenv)
+            uv venv
+        }
+
+        Write-Info ($script:ActiveMessages.SyncBackend -f $script:PipIndex)
+        uv sync
+        Pop-Location
+    }
+
+    if (Test-Path "apps/frontend") {
+        Ensure-FrontendEnv | Out-Null
+        Push-Location "apps/frontend"
+        Write-Info ($script:ActiveMessages.InstallFrontend)
+        npm install
+        Pop-Location
+    }
+
+    Write-Success ($script:ActiveMessages.Done)
+    Write-Host ($script:ActiveMessages.Next) -ForegroundColor Yellow
+    Write-Host ($script:ActiveMessages.Next1) -ForegroundColor Yellow
+    Write-Host ($script:ActiveMessages.Next2) -ForegroundColor Yellow
+
+    if ($StartDev) {
+        npm run dev
+    }
+}
+
+if ($Help) {
+    $helpLocale = if ($NetworkProfile -eq 'china') { 'china' } else { 'global' }
+    Write-Host $script:HelpTexts[$helpLocale]
+    Write-Host "无参数运行脚本将进入交互式菜单。"
+    exit 0
+}
+
+$nonHelpParameters = $PSBoundParameters.Keys | Where-Object { $_ -ne 'Help' }
+if ($nonHelpParameters.Count -gt 0) {
+    Invoke-Install -RequestedProfile $NetworkProfile -StartDev:$StartDev
+} else {
+    Show-MainMenu
 }

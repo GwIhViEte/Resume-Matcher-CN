@@ -1,7 +1,6 @@
 import { ImprovedResult } from '@/components/common/resume_previewer_context';
 import type { Locale } from '@/i18n/config';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL!;
+import { getApiBaseUrl } from '@/lib/api/config';
 
 /** Uploads job descriptions and returns a job_id */
 export async function uploadJobDescriptions(
@@ -11,7 +10,8 @@ export async function uploadJobDescriptions(
     token: string | null,
     locale: Locale
 ): Promise<string> {
-    const res = await fetch(`${API_URL}/api/v1/jobs/upload`, {
+    const baseUrl = getApiBaseUrl();
+    const res = await fetch(`${baseUrl}/api/v1/jobs/upload`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -41,8 +41,9 @@ export async function improveResume(
     locale: Locale
 ): Promise<ImprovedResult> {
     let response: Response;
+    const baseUrl = getApiBaseUrl();
     try {
-        response = await fetch(`${API_URL}/api/v1/resumes/improve`, {
+        response = await fetch(`${baseUrl}/api/v1/resumes/improve`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
