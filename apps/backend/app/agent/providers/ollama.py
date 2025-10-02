@@ -18,7 +18,7 @@ class OllamaProvider(Provider):
         self.opts = opts
         self.model = model_name
         self._client = ollama.Client(host=host) if host else ollama.Client()
-        installed_ollama_models = [model_class.model for model_class in self._client.list().models]
+        installed_ollama_models = self._extract_installed_model_names()
         if model_name not in installed_ollama_models:
             try:
                 self._client.pull(model_name)
@@ -26,6 +26,22 @@ class OllamaProvider(Provider):
                 raise ProviderError(
                     f"Ollama Model '{model_name}' could not be pulled. Please update your apps/backend/.env file or select from the installed models."
                 ) from e
+
+    def _extract_installed_model_names(self) -> List[str]:
+        response = self._client.list()
+        models = getattr(response, "models", None)
+        if models is None:
+            try:
+                models = response["models"]  # type: ignore[index]
+            except Exception:
+                models = []
+
+        results: List[str] = []
+        for model_info in models:
+            name = self._resolve_model_name(model_info)
+            if name:
+                results.append(name)
+        return results
 
     @staticmethod
     async def _get_installed_models(host: Optional[str] = None) -> List[str]:
@@ -35,9 +51,30 @@ class OllamaProvider(Provider):
 
         def _list_sync() -> List[str]:
             client = ollama.Client(host=host) if host else ollama.Client()
-            return [model_class.model for model_class in client.list().models]
+            response = client.list()
+            models = getattr(response, "models", None)
+            if models is None:
+                try:
+                    models = response["models"]  # type: ignore[index]
+                except Exception:
+                    models = []
+            results: List[str] = []
+            for model_info in models:
+                name = OllamaProvider._resolve_model_name(model_info)
+                if name:
+                    results.append(name)
+            return results
 
         return await run_in_threadpool(_list_sync)
+
+    @staticmethod
+    def _resolve_model_name(model_info: Any) -> Optional[str]:
+        if isinstance(model_info, dict):
+            return model_info.get("name") or model_info.get("model")
+        name = getattr(model_info, "name", None)
+        if name:
+            return name
+        return getattr(model_info, "model", None)
 
     def _generate_sync(self, prompt: str, options: Dict[str, Any]) -> str:
         """
@@ -80,7 +117,41 @@ class OllamaEmbeddingProvider(EmbeddingProvider):
                 input=text,
                 model=self._model,
             )
-            return response.embeddings
+            embedding = self._extract_embedding(response)
+            if embedding is None:
+                raise KeyError("embedding")
+            return embedding
         except Exception as e:
             logger.error(f"ollama embedding error: {e}")
             raise ProviderError(f"Ollama - Error generating embedding: {e}") from e
+
+    @staticmethod
+    def _extract_embedding(response: Any) -> Optional[List[float]]:
+        if response is None:
+            return None
+
+        if isinstance(response, dict):
+            if "embedding" in response and isinstance(response["embedding"], list):
+                return response["embedding"]
+
+            embeddings = response.get("embeddings")
+            if isinstance(embeddings, list) and embeddings:
+                first_item = embeddings[0]
+                if isinstance(first_item, dict) and isinstance(first_item.get("embedding"), list):
+                    return first_item["embedding"]
+                if isinstance(first_item, list):
+                    return first_item
+
+        attr_embedding = getattr(response, "embedding", None)
+        if isinstance(attr_embedding, list):
+            return attr_embedding
+
+        attr_embeddings = getattr(response, "embeddings", None)
+        if isinstance(attr_embeddings, list) and attr_embeddings:
+            first_item = attr_embeddings[0]
+            if isinstance(first_item, dict) and isinstance(first_item.get("embedding"), list):
+                return first_item["embedding"]
+            if isinstance(first_item, list):
+                return first_item
+
+        return None
