@@ -19,7 +19,7 @@ from .exceptions import JobNotFoundError
 
 logger = logging.getLogger(__name__)
 
-PREMIUM_MODELS = ['gpt-4o']
+PREMIUM_MODELS = ['gpt']
 
 
 class JobService:

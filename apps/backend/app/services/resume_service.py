@@ -226,7 +226,7 @@ class ResumeService:
 		return combined_data
 
 
-PREMIUM_MODELS = ['gpt-4o']
+PREMIUM_MODELS = ['gpt']
 
 
 def safe_json_dumps(payload: object, key: str | None = None) -> str:

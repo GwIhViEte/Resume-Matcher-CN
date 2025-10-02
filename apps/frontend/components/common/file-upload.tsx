@@ -43,7 +43,7 @@ const REMOTE_MODEL_OPTIONS = (() => {
 	return options;
 })();
 
-const PREMIUM_MODELS = MODEL_SELECTION_ENABLED ? ['gpt-4o'] : [];
+const PREMIUM_MODELS = MODEL_SELECTION_ENABLED ? ['gpt'] : [];
 
 const SUCCESS_STATUS = 'success' as const;
 const ERROR_STATUS = 'error' as const;
