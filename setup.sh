@@ -321,8 +321,17 @@ if not path.exists():
 
 text = path.read_text(encoding="utf-8") if path.stat().st_size else ""
 lines = text.splitlines()
-safe_value = value.replace('"', '""')
-formatted = f'{key}="{safe_value}"'
+
+def escape_env_value(raw: str) -> str:
+    """Escape characters that are unsafe for .env double quoted values."""
+    return (
+        raw.replace("\\", "\\\\")
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace('"', '\\"')
+    )
+
+formatted = f'{key}="{escape_env_value(value)}"'
 
 for idx, line in enumerate(lines):
     if line.strip().startswith(f"{key}="):
