@@ -1,127 +1,741 @@
 #!/usr/bin/env bash
-# setup.sh - Resume Matcher 初始化脚本
+# setup.sh - Resume Matcher 安装助手（Bash 版本）
 set -euo pipefail
-export PYTHONDONTWRITEBYTECODE=1
 IFS=$'\n\t'
 
-OS="$(uname -s)"
-case "$OS" in
-  Linux*)   OS_TYPE="Linux" ;;
-  Darwin*)  OS_TYPE="macOS" ;;
-  *)        OS_TYPE="$OS" ;;
-esac
+export PYTHONDONTWRITEBYTECODE=1
 
-info()    { echo -e "ℹ  $*"; }
-success() { echo -e "✅ $*"; }
-error()   { echo -e "❌ $*" >&2; exit 1; }
-have()    { command -v "$1" >/dev/null 2>&1; }
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
-# 检查命令
-info "检测依赖..."
-for c in node npm python3 pip3; do
-  have "$c" || error "未安装命令: $c，请先安装再运行此脚本。"
-done
+export PATH="$HOME/.local/bin:$PATH"
 
-# 设置 npm 国内源
-info "设置 npm 国内镜像..."
-npm config set registry https://registry.npmmirror.com
+DEV_PID_FILE="$SCRIPT_DIR/.devserver.pid"
+DEV_LOG_FILE="$SCRIPT_DIR/.devserver.log"
 
-# 设置 pip 国内源（全局配置）
-PIP_CONF_DIR="$HOME/.pip"
-mkdir -p "$PIP_CONF_DIR"
-cat > "$PIP_CONF_DIR/pip.conf" <<EOF
-[global]
-index-url = https://pypi.tuna.tsinghua.edu.cn/simple
-EOF
-success "pip 已设置国内镜像"
+INTERFACE_LOCALE="global"
+CURRENT_PROFILE="auto"
+NPM_REGISTRY="https://registry.npmjs.org"
+PIP_INDEX="https://pypi.org/simple"
+UV_INDEX="$PIP_INDEX"
+REQUESTED_PROFILE=""
+START_DEV_AFTER_INSTALL=0
 
-# 安装 uv（如果没有）
-if ! have uv; then
-  info "安装 uv..."
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  export PATH="$HOME/.local/bin:$PATH"
+if [[ "${LANG:-}" == zh* ]]; then
+  INTERFACE_LOCALE="china"
 fi
 
-# Linux：安装 PDF 系统依赖（可选但推荐）
-if [[ "$OS_TYPE" == "Linux" ]]; then
-  info "安装 PDF 解析系统依赖（poppler/tesseract/imagemagick/ghostscript/中文字体）..."
-  export DEBIAN_FRONTEND=noninteractive
-  sudo apt-get update -y
-  sudo apt-get install -y \
-    poppler-utils ghostscript imagemagick \
-    tesseract-ocr libtesseract-dev tesseract-ocr-chi-sim tesseract-ocr-chi-tra \
-    fontconfig fonts-noto-cjk libcairo2 libpango-1.0-0 libxml2 || true
+info() { printf 'ℹ️  %s\n' "$*"; }
+success() { printf '✅ %s\n' "$*"; }
+warn() { printf '⚠️  %s\n' "$*"; }
+error_exit() { printf '❌ %s\n' "$*" >&2; exit 1; }
+command_exists() { command -v "$1" >/dev/null 2>&1; }
 
-  # 调整 ImageMagick policy：允许 PDF/PS/EPS 只读
-  for f in /etc/ImageMagick-6/policy.xml /etc/ImageMagick-7/policy.xml; do
-    if [[ -f "$f" ]]; then
-      sudo cp -a "$f" "${f}.bak" || true
-      sudo sed -i \
-        -e 's#<policy domain="coder" rights="none" pattern="PDF" />#<policy domain="coder" rights="read" pattern="PDF" />#g' \
-        -e 's#<policy domain="coder" rights="none" pattern="PS" />#<policy domain="coder" rights="read" pattern="PS" />#g' \
-        -e 's#<policy domain="coder" rights="none" pattern="EPS" />#<policy domain="coder" rights="read" pattern="EPS" />#g' \
-        "$f" || true
+loc() {
+  local zh="$1"
+  local en="$2"
+  if [[ "$INTERFACE_LOCALE" == "china" ]]; then
+    printf '%s' "$zh"
+  else
+    printf '%s' "$en"
+  fi
+}
+
+refresh_screen() {
+  if command -v clear >/dev/null 2>&1; then
+    clear
+  else
+    printf '\n'
+  fi
+}
+
+print_help() {
+  cat <<EOF
+$(loc '用法: ./setup.sh [--help] [--profile auto|china|global] [--start-dev]' 'Usage: ./setup.sh [--help] [--profile auto|china|global] [--start-dev]')
+  --help         $(loc '显示本帮助并退出' 'Show this help and exit')
+  --profile MODE $(loc '指定网络模式: auto(自动), china(国内镜像), global(官方源)' 'Choose network mode: auto (auto-detect), china (mirrors), global (official)')
+  --start-dev    $(loc '依赖安装完成后立即执行 npm run dev' 'Run npm run dev after installation')
+$(loc '不带参数运行将进入交互式菜单。' 'Run without arguments to open the interactive menu.')
+EOF
+}
+
+select_language() {
+  while true; do
+    refresh_screen
+    printf "\n%s\n" "$(loc '请选择脚本显示语言 / Select interface language' 'Select interface language / 请选择脚本显示语言')"
+    printf "1) %s\n" "$(loc '简体中文' 'Simplified Chinese')"
+    printf "2) %s\n" "$(loc 'English' 'English')"
+    local choice
+    read -r -p ">> " choice
+    case "$choice" in
+      1)
+        INTERFACE_LOCALE="china"
+        refresh_screen
+        return
+        ;;
+      2)
+        INTERFACE_LOCALE="global"
+        refresh_screen
+        return
+        ;;
+      *)
+        warn "$(loc '无效选项，请重新输入' 'Invalid option, please try again')"
+        ;;
+    esac
+  done
+}
+
+pause_for_menu() {
+  read -r -p "$(loc '按回车返回菜单' 'Press Enter to return to menu')" _
+}
+
+confirm_action() {
+  local question_cn="$1"
+  local question_en="$2"
+  local answer
+  while true; do
+    if [[ "$INTERFACE_LOCALE" == "china" ]]; then
+      read -r -p "$question_cn (Y/N): " answer
+    else
+      read -r -p "$question_en (Y/N): " answer
+    fi
+    [[ -z "$answer" ]] && continue
+    answer="${answer^^}"
+    case "$answer" in
+      Y|YES|是|S) return 0 ;;
+      N|NO|否) return 1 ;;
+      *) warn "$(loc '请输入 Y 或 N' 'Please enter Y or N')" ;;
+    esac
+  done
+}
+
+test_endpoint() {
+  local url="$1"
+  if curl -fsS --connect-timeout 5 --max-time 10 -o /dev/null "$url"; then
+    return 0
+  fi
+  return 1
+}
+
+resolve_network_profile() {
+  local requested="${1:-auto}"
+  case "$requested" in
+    china)
+      info "$(printf "$(loc '已选择网络模式：%s' 'Using forced network profile: %s')" "china")"
+      echo "china"
+      ;;
+    global)
+      info "$(printf "$(loc '已选择网络模式：%s' 'Using forced network profile: %s')" "global")"
+      echo "global"
+      ;;
+    *)
+      info "$(loc '正在自动探测网络可达性...' 'Auto-detecting network connectivity...')"
+      local endpoints=(
+        "TUNA PyPI|https://pypi.tuna.tsinghua.edu.cn/simple"
+        "npmmirror|https://registry.npmmirror.com"
+      )
+      local all_reachable=1
+      local entry name url status
+      for entry in "${endpoints[@]}"; do
+        name="${entry%%|*}"
+        url="${entry#*|}"
+        if test_endpoint "$url"; then
+          status="$(loc '可达' 'reachable')"
+        else
+          status="$(loc '不可达' 'unreachable')"
+          all_reachable=0
+        fi
+        info "$(printf "$(loc '探测 %s (%s) => %s' 'Probe %s (%s) => %s')" "$name" "$url" "$status")"
+      done
+      if (( all_reachable == 1 )); then
+        info "$(printf "$(loc '自动判定为：%s 模式（可在菜单覆盖）' 'Auto-detect result: %s profile (override via menu)')" "china")"
+        echo "china"
+      else
+        info "$(printf "$(loc '自动判定为：%s 模式（可在菜单覆盖）' 'Auto-detect result: %s profile (override via menu)')" "global")"
+        echo "global"
+      fi
+      ;;
+  esac
+}
+
+apply_mirrors() {
+  local profile="$1"
+  CURRENT_PROFILE="$profile"
+  if [[ "$profile" == "china" ]]; then
+    NPM_REGISTRY="https://registry.npmmirror.com"
+    PIP_INDEX="https://pypi.tuna.tsinghua.edu.cn/simple"
+  else
+    NPM_REGISTRY="https://registry.npmjs.org"
+    PIP_INDEX="https://pypi.org/simple"
+  fi
+  UV_INDEX="$PIP_INDEX"
+  export NPM_CONFIG_REGISTRY="$NPM_REGISTRY"
+  export PIP_INDEX_URL="$PIP_INDEX"
+  export UV_INDEX_URL="$UV_INDEX"
+  info "$(printf "$(loc '当前使用的源 -> npm: %s，PyPI: %s' 'Active registries -> npm: %s, PyPI: %s')" "$NPM_REGISTRY" "$PIP_INDEX")"
+}
+
+find_python() {
+  if command_exists "python3"; then
+    echo "python3"
+  elif command_exists "python"; then
+    echo "python"
+  else
+    return 1
+  fi
+}
+
+find_pip() {
+  if command_exists "pip3"; then
+    echo "pip3"
+  elif command_exists "pip"; then
+    echo "pip"
+  else
+    return 1
+  fi
+}
+
+install_uv_if_missing() {
+  if command_exists "uv"; then
+    success "$(loc 'uv 检测通过' 'uv detected')"
+    return
+  fi
+
+  info "$(loc '未检测到 uv，尝试自动安装...' 'uv not found. Attempting automatic installation...')"
+  local urls=()
+  if [[ "$CURRENT_PROFILE" == "china" ]]; then
+    urls=(
+      "https://mirror.ghproxy.com/https://astral.sh/uv/install.sh"
+      "https://ghproxy.com/https://astral.sh/uv/install.sh"
+      "https://astral.sh/uv/install.sh"
+    )
+  else
+    urls=("https://astral.sh/uv/install.sh")
+  fi
+
+  local tmp
+  tmp="$(mktemp)"
+  local installed=0
+  local url
+  for url in "${urls[@]}"; do
+    info "$(printf "$(loc '下载安装脚本：%s' 'Downloading installer: %s')" "$url")"
+    if curl -fsSL "$url" -o "$tmp"; then
+      if sh "$tmp" >/dev/null 2>&1; then
+        installed=1
+        break
+      fi
+    fi
+    warn "$(printf "$(loc '安装脚本失败：%s' 'Installer failed: %s')" "$url")"
+  done
+  rm -f "$tmp"
+
+  export PATH="$HOME/.local/bin:$PATH"
+
+  if ! command_exists "uv"; then
+    if (( installed == 1 )); then
+      error_exit "$(loc 'uv 安装失败，请参考 https://docs.astral.sh/uv/' 'uv installation failed. Please install manually: https://docs.astral.sh/uv/')"
+    else
+      error_exit "$(loc '无法获取 uv 安装脚本，请手动安装' 'Unable to download uv installer. Please install manually.')"
+    fi
+  fi
+
+  success "$(loc 'uv 检测通过' 'uv detected')"
+}
+
+remove_bom() {
+  local file="$1"
+  if [[ ! -f "$file" ]]; then
+    return
+  fi
+  local py
+  if ! py="$(find_python)"; then
+    return
+  fi
+  "$py" - "$file" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+if not path.exists():
+    sys.exit(0)
+data = path.read_bytes()
+if data.startswith(b"\xef\xbb\xbf"):
+    path.write_bytes(data[3:])
+PY
+}
+
+ensure_env_file() {
+  local sample="$1"
+  local target="$2"
+  local label="$3"
+  if [[ -f "$sample" && ! -f "$target" ]]; then
+    info "$(printf "$(loc '复制 %s -> %s' 'Copy %s -> %s')" "$sample" "$target")"
+    cp "$sample" "$target"
+    success "$(printf "$(loc '%s 已创建，请填写必要配置' '%s created. Please fill required secrets')" "$label")"
+  elif [[ -f "$target" ]]; then
+    info "$(printf "$(loc '%s 已存在' '%s already exists')" "$label")"
+  else
+    touch "$target"
+    success "$(printf "$(loc '%s 已创建，请填写必要配置' '%s created. Please fill required secrets')" "$label")"
+  fi
+  remove_bom "$target"
+}
+
+ensure_backend_env() {
+  local path="$SCRIPT_DIR/apps/backend/.env"
+  local sample="$SCRIPT_DIR/apps/backend/.env.sample"
+  if [[ -d "$SCRIPT_DIR/apps/backend" ]]; then
+    ensure_env_file "$sample" "$path" "backend .env"
+  fi
+  echo "$path"
+}
+
+ensure_frontend_env() {
+  local path="$SCRIPT_DIR/apps/frontend/.env"
+  local sample="$SCRIPT_DIR/apps/frontend/.env.sample"
+  if [[ -d "$SCRIPT_DIR/apps/frontend" ]]; then
+    ensure_env_file "$sample" "$path" "frontend .env"
+  fi
+  echo "$path"
+}
+
+set_env_entry() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
+  local py
+  if ! py="$(find_python)"; then
+    error_exit "$(loc '未检测到 Python 3，请先安装' 'Python 3 not found. Please install Python 3.')"
+  fi
+  remove_bom "$file"
+  "$py" - "$file" "$key" "$value" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+key = sys.argv[2]
+value = sys.argv[3]
+
+if not path.exists():
+    path.touch()
+
+text = path.read_text(encoding="utf-8") if path.stat().st_size else ""
+lines = text.splitlines()
+safe_value = value.replace('"', '""')
+formatted = f'{key}="{safe_value}"'
+
+for idx, line in enumerate(lines):
+    if line.strip().startswith(f"{key}="):
+        lines[idx] = formatted
+        break
+else:
+    lines.append(formatted)
+
+path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+PY
+}
+
+install_dependencies() {
+  local requested="${1:-auto}"
+  local start_dev="${2:-0}"
+
+  info "$(loc '开始运行 Resume Matcher 安装流程...' 'Starting Resume Matcher setup...')"
+  local profile
+  profile="$(resolve_network_profile "$requested")"
+  apply_mirrors "$profile"
+
+  if ! command_exists "node"; then
+    error_exit "$(loc '未检测到 Node.js，请先安装 Node.js v18+' 'Node.js not found. Please install Node.js v18+ first.')"
+  fi
+  local node_version
+  node_version="$(node --version)"
+  local node_major="${node_version#v}"
+  node_major="${node_major%%.*}"
+  if [[ -z "$node_major" ]] || (( node_major < 18 )); then
+    error_exit "$(printf "$(loc 'Node.js 版本 %s 过低，需要 v18+' 'Node.js version %s is too old. v18+ required.')" "$node_version")"
+  fi
+  success "$(printf "$(loc 'Node.js %s 检测通过' 'Node.js %s detected')" "$node_version")"
+
+  if ! command_exists "npm"; then
+    error_exit "$(loc '未检测到 npm，请安装后重试' 'npm not found. Please install npm and retry.')"
+  fi
+  success "$(printf "$(loc 'npm 检测通过（源 %s）' 'npm detected (registry %s)')" "$NPM_REGISTRY")"
+
+  local python_cmd
+  if ! python_cmd="$(find_python)"; then
+    error_exit "$(loc '未检测到 Python 3，请先安装' 'Python 3 not found. Please install Python 3.')"
+  fi
+  success "$(printf "$(loc 'Python 检测通过，执行命令：%s' 'Python detected via %s')" "$python_cmd")"
+
+  local pip_cmd
+  if ! pip_cmd="$(find_pip)"; then
+    error_exit "$(loc '未检测到 pip，请先安装' 'pip not found. Please install pip.')"
+  fi
+  success "$(printf "$(loc 'pip 检测通过（索引 %s）' 'pip detected (index %s)')" "$PIP_INDEX")"
+
+  install_uv_if_missing
+
+  ensure_env_file "$SCRIPT_DIR/.env.example" "$SCRIPT_DIR/.env" "root .env"
+
+  info "$(loc '安装仓库级 npm 依赖...' 'Installing workspace npm dependencies...')"
+  NPM_CONFIG_REGISTRY="$NPM_REGISTRY" npm install
+  success "$(loc 'npm install 完成' 'npm install completed')"
+
+  if [[ -d "$SCRIPT_DIR/apps/backend" ]]; then
+    ensure_env_file "$SCRIPT_DIR/apps/backend/.env.sample" "$SCRIPT_DIR/apps/backend/.env" "backend .env"
+    (
+      cd "$SCRIPT_DIR/apps/backend"
+      if [[ ! -d ".venv" ]]; then
+        info "$(loc '创建 Python 虚拟环境（uv venv）...' 'Creating Python virtual environment (uv venv)...')"
+        UV_INDEX_URL="$UV_INDEX" uv venv
+        success "$(loc 'uv venv 完成' 'uv venv completed')"
+      fi
+      info "$(printf "$(loc '同步后端依赖（uv sync，PyPI 源 %s）...' 'Syncing backend dependencies (uv sync, index %s)...')" "$PIP_INDEX")"
+      UV_INDEX_URL="$UV_INDEX" uv sync
+      success "$(loc 'uv sync 完成' 'uv sync completed')"
+    )
+  fi
+
+  if [[ -d "$SCRIPT_DIR/apps/frontend" ]]; then
+    ensure_env_file "$SCRIPT_DIR/apps/frontend/.env.sample" "$SCRIPT_DIR/apps/frontend/.env" "frontend .env"
+    (
+      cd "$SCRIPT_DIR/apps/frontend"
+      info "$(loc '安装前端依赖（npm install）...' 'Installing frontend dependencies (npm install)...')"
+      NPM_CONFIG_REGISTRY="$NPM_REGISTRY" npm install
+      success "$(loc '前端依赖安装完成' 'Frontend dependencies installed')"
+    )
+  fi
+
+  success "$(loc '依赖安装完成' 'Dependency installation completed')"
+  printf "%s\n" "$(loc '后续步骤：' 'Next steps:')"
+  printf "%s\n" "$(loc '  1. 在各 .env 中填入所需的 API 凭据' '  1. Populate required API credentials in .env files')"
+  printf "%s\n" "$(loc '  2. 运行 npm run dev 启动开发服务器' '  2. Run \"npm run dev\" to start development servers')"
+
+  if [[ "$start_dev" == "1" ]]; then
+    start_dev_servers
+  fi
+}
+
+check_repository_updates() {
+  if ! command_exists "git"; then
+    warn "$(loc '未检测到 git，请先安装 Git。' 'git not found. Please install Git first.')"
+    return
+  fi
+
+  if ! confirm_action "确认执行仓库更新检查？" "Run repository update check?"; then
+    info "$(loc '已取消仓库更新检查' 'Update check cancelled')"
+    return
+  fi
+
+  info "$(loc '同步远程仓库引用...' 'Fetching remote references...')"
+  git fetch --all --prune
+  success "$(loc '远程引用已更新' 'Remote references updated')"
+
+  local branch
+  branch="$(git rev-parse --abbrev-ref HEAD | tr -d '\r\n')"
+  info "$(printf "$(loc '当前分支：%s' 'Current branch: %s')" "$branch")"
+
+  printf "%s\n" "$(loc '--- git status -sb ---' '--- git status -sb ---')"
+  git status -sb
+
+  printf "%s\n" "$(printf "$(loc '--- 与 origin/%s 的最近差异 ---' '--- Recent commits from origin/%s ---')" "$branch")"
+  git log --oneline --decorate --max-count 5 "HEAD..origin/$branch"
+}
+
+start_dev_servers() {
+  ensure_env_file "$SCRIPT_DIR/.env.example" "$SCRIPT_DIR/.env" "root .env"
+
+  if [[ -f "$DEV_PID_FILE" ]]; then
+    local existing_pid
+    existing_pid="$(<"$DEV_PID_FILE")"
+    if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" >/dev/null 2>&1; then
+      info "$(printf "$(loc '开发服务器已在运行 (PID %s)' 'Dev servers already running (PID %s)')" "$existing_pid")"
+      return
+    else
+      rm -f "$DEV_PID_FILE"
+      warn "$(loc 'PID 信息无效，已清理记录' 'PID record invalid, cleaned up')"
+    fi
+  fi
+
+  : > "$DEV_LOG_FILE"
+  (
+    cd "$SCRIPT_DIR"
+    nohup npm run dev >>"$DEV_LOG_FILE" 2>&1 &
+    echo $! >"$DEV_PID_FILE"
+  )
+  sleep 1
+  local pid
+  pid="$(<"$DEV_PID_FILE")"
+  if [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1; then
+    success "$(printf "$(loc '已在后台启动开发服务器 (PID %s)' 'Started dev servers in background (PID %s)')" "$pid")"
+    info "$(printf "$(loc '日志输出保存至 %s' 'Logs written to %s')" "$DEV_LOG_FILE")"
+  else
+    rm -f "$DEV_PID_FILE"
+    warn "$(loc '启动开发服务器失败，请检查 npm run dev 输出' 'Failed to start dev servers. Check npm run dev output')"
+  fi
+}
+
+stop_dev_servers() {
+  if [[ ! -f "$DEV_PID_FILE" ]]; then
+    info "$(loc '未记录正在运行的开发服务器' 'No recorded dev server to stop')"
+    return
+  fi
+
+  local pid
+  pid="$(<"$DEV_PID_FILE")"
+  if [[ -z "$pid" ]]; then
+    rm -f "$DEV_PID_FILE"
+    warn "$(loc 'PID 信息无效，已清理记录' 'PID record invalid, cleaned up')"
+    return
+  fi
+
+  if ! kill -0 "$pid" >/dev/null 2>&1; then
+    rm -f "$DEV_PID_FILE"
+    warn "$(loc 'PID 信息无效，已清理记录' 'PID record invalid, cleaned up')"
+    return
+  fi
+
+  if kill "$pid" >/dev/null 2>&1; then
+    success "$(printf "$(loc '已停止开发服务器 (PID %s)' 'Stopped dev servers (PID %s)')" "$pid")"
+  else
+    warn "$(printf "$(loc '停止开发服务器时出现问题：%s' 'Failed to stop dev servers: %s')" "PID $pid")"
+  fi
+  rm -f "$DEV_PID_FILE"
+}
+
+uninstall_dependencies() {
+  local targets=(
+    "$SCRIPT_DIR/node_modules"
+    "$SCRIPT_DIR/apps/frontend/node_modules"
+    "$SCRIPT_DIR/apps/backend/.venv"
+  )
+  local existing=()
+  local target
+  for target in "${targets[@]}"; do
+    if [[ -e "$target" ]]; then
+      existing+=("$target")
     fi
   done
-  success "PDF 系统依赖与 policy 调整完成"
-fi
 
-# 初始化根 .env
-if [[ -f .env.example && ! -f .env ]]; then
-  cp .env.example .env
-  success "根目录 .env 创建完成，请填写 OPENAI_API_KEY"
-fi
-
-# 安装根依赖（忽略 install 脚本，避免触发子项目二次安装）
-info "安装根依赖 (npm ci/install 加速版)..."
-if [[ -f package-lock.json ]]; then
-  npm ci --no-fund --no-audit --ignore-scripts --registry=https://registry.npmmirror.com
-else
-  npm install --no-fund --no-audit --ignore-scripts --registry=https://registry.npmmirror.com
-fi
-success "根依赖安装完成"
-
-# 后端
-info "安装后端依赖..."
-(
-  cd apps/backend
-  if [[ -f .env.sample && ! -f .env ]]; then
-    cp .env.sample .env
-    success "后端 .env 创建完成"
+  if (( ${#existing[@]} == 0 )); then
+    info "$(loc '未找到需要清理的依赖目录' 'No dependency directories found to remove')"
+    return
   fi
-  [[ -d .venv ]] || uv venv
-  # shellcheck disable=SC1091
-  source .venv/bin/activate
-  # 项目依赖
-  if [[ -f pyproject.toml ]]; then
-    uv pip install -e . --index-url https://pypi.tuna.tsinghua.edu.cn/simple
-  fi
-  # 兜底补齐 PDF 常用包（已装会快速跳过）
-  uv pip install pdfplumber pdfminer.six pymupdf pillow pytesseract
-  success "后端依赖安装完成"
-)
 
-# 前端
-info "安装前端依赖..."
-(
-  cd apps/frontend
-  if [[ -f .env.sample && ! -f .env ]]; then
-    cp .env.sample .env
-    success "前端 .env 创建完成"
+  info "$(loc '以下目录将被删除：' 'The following directories will be removed:')"
+  for target in "${existing[@]}"; do
+    printf "  - %s\n" "$target"
+  done
+
+  local confirm
+  read -r -p "$(loc '请输入 YES 确认删除： ' 'Type YES to proceed: ')" confirm
+  if [[ "${confirm^^}" != "YES" ]]; then
+    info "$(loc '已取消卸载操作' 'Uninstall operation cancelled')"
+    return
   fi
-  if [[ -f package-lock.json ]]; then
-    npm ci --no-fund --no-audit --prefer-offline --progress=false --registry=https://registry.npmmirror.com
+
+  for target in "${existing[@]}"; do
+    if rm -rf "$target"; then
+      success "$(printf "$(loc '已删除 %s' 'Removed %s')" "$target")"
+    else
+      warn "$(printf "$(loc '删除 %s 时出现问题' 'Failed to remove %s')" "$target")"
+    fi
+  done
+
+  success "$(loc '卸载流程完成' 'Cleanup completed')"
+}
+
+configure_ollama() {
+  local backend_env
+  backend_env="$(ensure_backend_env)"
+  local frontend_env
+  frontend_env="$(ensure_frontend_env)"
+
+  local default_ll="gemma3:4b"
+  local default_embed="nomic-embed-text:latest"
+  local ll_input
+  local embed_input
+  if [[ "$INTERFACE_LOCALE" == "china" ]]; then
+    read -r -p "请输入对话模型名称 (默认 ${default_ll}): " ll_input
+    read -r -p "请输入向量模型名称 (默认 ${default_embed}): " embed_input
   else
-    npm install --no-fund --no-audit --prefer-offline --progress=false --registry=https://registry.npmmirror.com
+    read -r -p "Enter chat model name (default ${default_ll}): " ll_input
+    read -r -p "Enter embedding model name (default ${default_embed}): " embed_input
   fi
-  success "前端依赖安装完成"
-)
+  [[ -z "$ll_input" ]] && ll_input="$default_ll"
+  [[ -z "$embed_input" ]] && embed_input="$default_embed"
 
-# 可选：构建
-if grep -q '"build"\s*:' package.json 2>/dev/null; then
-  info "构建项目 (npm run build)..."
-  CI=1 NEXT_TELEMETRY_DISABLED=1 npm run build </dev/null
-  success "项目构建完成"
+  set_env_entry "$backend_env" "LLM_PROVIDER" "ollama"
+  set_env_entry "$backend_env" "LLM_BASE_URL" "http://127.0.0.1:11434"
+  set_env_entry "$backend_env" "LLM_API_KEY" ""
+  set_env_entry "$backend_env" "LL_MODEL" "$ll_input"
+  set_env_entry "$backend_env" "EMBEDDING_PROVIDER" "ollama"
+  set_env_entry "$backend_env" "EMBEDDING_BASE_URL" "http://127.0.0.1:11434"
+  set_env_entry "$backend_env" "EMBEDDING_API_KEY" ""
+  set_env_entry "$backend_env" "EMBEDDING_MODEL" "$embed_input"
+
+  set_env_entry "$frontend_env" "NEXT_PUBLIC_LLM_PROVIDER" "ollama"
+  set_env_entry "$frontend_env" "NEXT_PUBLIC_DEFAULT_MODEL" "$ll_input"
+  set_env_entry "$frontend_env" "NEXT_PUBLIC_MODEL_SELECTION" "disabled"
+
+  success "$(loc '已切换为本地 Ollama 配置' 'Switched to local Ollama configuration')"
+}
+
+configure_api() {
+  local backend_env
+  backend_env="$(ensure_backend_env)"
+  local frontend_env
+  frontend_env="$(ensure_frontend_env)"
+
+  local default_provider="openai"
+  local default_base="https://api.openai.com/v1"
+  local default_ll="gpt-4.1"
+  local default_embed="text-embedding-3-large"
+
+  local provider_input
+  local base_input
+  local ll_input
+  local embed_input
+  local api_key_input
+
+  if [[ "$INTERFACE_LOCALE" == "china" ]]; then
+    read -r -p "请输入提供商标识 (默认 ${default_provider}): " provider_input
+    read -r -p "请输入 API Base URL (默认 ${default_base}): " base_input
+    read -r -p "请输入对话模型名称 (默认 ${default_ll}): " ll_input
+    read -r -p "请输入向量模型名称 (默认 ${default_embed}): " embed_input
+    read -r -p "请输入 API Key (回车保留现有值): " api_key_input
+  else
+    read -r -p "Enter provider identifier (default ${default_provider}): " provider_input
+    read -r -p "Enter API base URL (default ${default_base}): " base_input
+    read -r -p "Enter chat model name (default ${default_ll}): " ll_input
+    read -r -p "Enter embedding model name (default ${default_embed}): " embed_input
+    read -r -p "Enter API Key (press Enter to keep current): " api_key_input
+  fi
+
+  [[ -z "$provider_input" ]] && provider_input="$default_provider"
+  [[ -z "$base_input" ]] && base_input="$default_base"
+  [[ -z "$ll_input" ]] && ll_input="$default_ll"
+  [[ -z "$embed_input" ]] && embed_input="$default_embed"
+
+  set_env_entry "$backend_env" "LLM_PROVIDER" "$provider_input"
+  set_env_entry "$backend_env" "LLM_BASE_URL" "$base_input"
+  set_env_entry "$backend_env" "LL_MODEL" "$ll_input"
+  set_env_entry "$backend_env" "EMBEDDING_PROVIDER" "$provider_input"
+  set_env_entry "$backend_env" "EMBEDDING_BASE_URL" "$base_input"
+  set_env_entry "$backend_env" "EMBEDDING_MODEL" "$embed_input"
+
+  if [[ -n "$api_key_input" ]]; then
+    set_env_entry "$backend_env" "LLM_API_KEY" "$api_key_input"
+    set_env_entry "$backend_env" "EMBEDDING_API_KEY" "$api_key_input"
+  fi
+
+  set_env_entry "$frontend_env" "NEXT_PUBLIC_LLM_PROVIDER" "$provider_input"
+  set_env_entry "$frontend_env" "NEXT_PUBLIC_DEFAULT_MODEL" "$ll_input"
+  set_env_entry "$frontend_env" "NEXT_PUBLIC_MODEL_SELECTION" "enabled"
+
+  success "$(loc '已切换为远程 API 配置' 'Switched to remote API configuration')"
+}
+
+provider_menu() {
+  refresh_screen
+  printf "\n%s\n" "$(loc '=== 模型提供商设置 ===' '=== Model Provider Settings ===')"
+  printf "%s\n" "$(loc '1) 使用本地 Ollama' '1) Use local Ollama')"
+  printf "%s\n" "$(loc '2) 使用远程 API' '2) Use remote API')"
+  printf "%s\n" "$(loc '0) 返回主菜单' '0) Return to main menu')"
+  local choice
+  read -r -p "$(loc '请选择操作：' 'Select an option: ') " choice
+  case "$choice" in
+    1) configure_ollama ;;
+    2) configure_api ;;
+    0) info "$(loc '已返回主菜单' 'Returning to main menu')" ;;
+    *) warn "$(loc '无效选项，请重新输入' 'Invalid option, please try again')" ;;
+  esac
+  pause_for_menu
+}
+
+main_menu() {
+  while true; do
+    refresh_screen
+    printf "\n%s\n" "$(loc '=== Resume Matcher 安装助手 ===' '=== Resume Matcher Setup Assistant ===')"
+    printf "%s\n" "$(loc '1) 安装/修复依赖' '1) Install / Repair dependencies')"
+    printf "%s\n" "$(loc '2) 检查仓库更新' '2) Check repository updates')"
+    printf "%s\n" "$(loc '3) 更改模型提供商' '3) Change model provider')"
+    printf "%s\n" "$(loc '4) 启动开发服务器' '4) Start dev servers')"
+    printf "%s\n" "$(loc '5) 停止开发服务器' '5) Stop dev servers')"
+    printf "%s\n" "$(loc '6) 卸载本地依赖' '6) Uninstall local dependencies')"
+    printf "%s\n" "$(loc '0) 退出' '0) Exit')"
+    local choice
+    read -r -p "$(loc '请选择操作：' 'Select an option: ') " choice
+    case "$choice" in
+      1)
+        local profile_input
+        read -r -p "$(loc '选择网络模式 (auto/china/global，默认 auto)： ' 'Select network profile (auto/china/global, default auto): ')" profile_input
+        [[ -z "$profile_input" ]] && profile_input="auto"
+        install_dependencies "$profile_input" 0
+        pause_for_menu
+        ;;
+      2)
+        check_repository_updates
+        pause_for_menu
+        ;;
+      3)
+        provider_menu
+        ;;
+      4)
+        start_dev_servers
+        pause_for_menu
+        ;;
+      5)
+        stop_dev_servers
+        pause_for_menu
+        ;;
+      6)
+        uninstall_dependencies
+        pause_for_menu
+        ;;
+      0)
+        break
+        ;;
+      *)
+        warn "$(loc '无效选项，请重新输入' 'Invalid option, please try again')"
+        pause_for_menu
+        ;;
+    esac
+  done
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --help|-h)
+      print_help
+      exit 0
+      ;;
+    --profile)
+      shift || error_exit "$(loc '缺少 --profile 的取值' 'Missing value for --profile')"
+      REQUESTED_PROFILE="$1"
+      ;;
+    --start-dev)
+      START_DEV_AFTER_INSTALL=1
+      ;;
+    *)
+      error_exit "$(printf "$(loc '未知参数：%s' 'Unknown option: %s')" "$1")"
+      ;;
+  esac
+  shift
+done
+
+if [[ -n "$REQUESTED_PROFILE" ]]; then
+  case "$REQUESTED_PROFILE" in
+    auto|china|global) ;;
+    *) error_exit "$(printf "$(loc '非法的网络模式：%s' 'Invalid profile: %s')" "$REQUESTED_PROFILE")" ;;
+  esac
 fi
 
-success "🎉 环境初始化完成！"
+if [[ -n "$REQUESTED_PROFILE" || $START_DEV_AFTER_INSTALL -eq 1 ]]; then
+  profile_to_use="${REQUESTED_PROFILE:-auto}"
+  install_dependencies "$profile_to_use" "$START_DEV_AFTER_INSTALL"
+  exit 0
+fi
+
+select_language
+main_menu
