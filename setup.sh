@@ -92,13 +92,42 @@ pause_for_menu() {
 confirm_action() {
   local question_cn="$1"
   local question_en="$2"
+  local default_choice="${3:-}"
   local answer
+  local prompt_cn="$question_cn (Y/N)"
+  local prompt_en="$question_en (Y/N)"
+
+  if [[ -n "$default_choice" ]]; then
+    local default_up="${default_choice^^}"
+    case "$default_up" in
+      Y|YES)
+        prompt_cn="$question_cn (Y/n)"
+        prompt_en="$question_en (Y/n)"
+        default_choice="Y"
+        ;;
+      N|NO)
+        prompt_cn="$question_cn (y/N)"
+        prompt_en="$question_en (y/N)"
+        default_choice="N"
+        ;;
+      *)
+        warn "$(loc 'confirm_action 默认值无效，已忽略' 'Invalid default for confirm_action, ignoring')"
+        default_choice=""
+        ;;
+    esac
+  fi
+
   while true; do
     if [[ "$INTERFACE_LOCALE" == "china" ]]; then
-      read -r -p "$question_cn (Y/N): " answer
+      read -r -p "$prompt_cn: " answer
     else
-      read -r -p "$question_en (Y/N): " answer
+      read -r -p "$prompt_en: " answer
     fi
+
+    if [[ -z "$answer" && -n "$default_choice" ]]; then
+      answer="$default_choice"
+    fi
+
     [[ -z "$answer" ]] && continue
     answer="${answer^^}"
     case "$answer" in
@@ -107,6 +136,139 @@ confirm_action() {
       *) warn "$(loc '请输入 Y 或 N' 'Please enter Y or N')" ;;
     esac
   done
+}
+
+run_with_progress() {
+  local message_cn="$1"
+  local message_en="$2"
+  shift 2
+  local message="$(loc "$message_cn" "$message_en")"
+  info "$message"
+  (
+    local frames=('⠋' '⠙' '⠚' '⠞' '⠖' '⠦' '⠴' '⠲' '⠳' '⠓')
+    local i=0
+    while true; do
+      printf '\r%s %s' "${frames[i]}" "$(loc '请稍候...' 'Please wait...')" >&2
+      ((i = (i + 1) % ${#frames[@]}))
+      sleep 0.2
+    done
+  ) &
+  local spinner_pid=$!
+  set +e
+  "$@"
+  local status=$?
+  set -e
+  kill "$spinner_pid" >/dev/null 2>&1 || true
+  wait "$spinner_pid" 2>/dev/null || true
+  printf '\r\033[K' >&2
+  return $status
+}
+
+wait_for_ports() {
+  local timeout="${1:-60}"
+  shift
+  local ports=("$@")
+  if (( ${#ports[@]} == 0 )); then
+    return 0
+  fi
+  local py
+  if ! py="$(find_python)"; then
+    return 0
+  fi
+  local start_ts
+  start_ts="$(date +%s)"
+  while true; do
+    local all_up=1
+    local port
+    for port in "${ports[@]}"; do
+      if ! "$py" - "$port" <<'PY'
+import socket
+import sys
+
+port = int(sys.argv[1])
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    sock.settimeout(1)
+    if sock.connect_ex(("127.0.0.1", port)) != 0:
+        raise SystemExit(1)
+PY
+      then
+        all_up=0
+        break
+      fi
+    done
+    if (( all_up == 1 )); then
+      return 0
+    fi
+    if (( $(date +%s) - start_ts >= timeout )); then
+      return 1
+    fi
+    sleep 2
+  done
+}
+
+acquire_dev_lock() {
+  if command_exists flock; then
+    exec {DEV_LOCK_FD}>"$DEV_PID_FILE.lock"
+    flock "$DEV_LOCK_FD"
+  fi
+}
+
+release_dev_lock() {
+  if [[ -n "${DEV_LOCK_FD:-}" ]]; then
+    flock -u "$DEV_LOCK_FD" 2>/dev/null || true
+    exec {DEV_LOCK_FD}>&-
+    unset DEV_LOCK_FD
+    rm -f "$DEV_PID_FILE.lock"
+  fi
+}
+
+resolve_repo_path() {
+  local target="$1"
+  local py_cmd="${PY_CMD:-}"
+  if [[ -z "$py_cmd" ]]; then
+    if ! py_cmd="$(find_python)"; then
+      return 1
+    fi
+  fi
+  TARGET_PATH="$target" "$py_cmd" - "$SCRIPT_DIR" <<'PY'
+import os
+import sys
+
+script_dir = os.path.abspath(sys.argv[1])
+target = os.environ.get("TARGET_PATH", "")
+
+if not target:
+    raise SystemExit(1)
+
+if not os.path.isabs(target):
+    target = os.path.join(script_dir, target)
+
+normalized = os.path.abspath(target)
+try:
+    common = os.path.commonpath([script_dir, normalized])
+except ValueError:
+    raise SystemExit(2)
+
+if common != script_dir:
+    raise SystemExit(2)
+
+print(normalized)
+PY
+}
+
+ensure_app_env() {
+  local app_name="$1"
+  local label="$2"
+  local dir="$SCRIPT_DIR/apps/$app_name"
+  local path="$dir/.env"
+  local sample="$dir/.env.sample"
+  if [[ ! -d "$dir" ]]; then
+    warn "$(printf "$(loc '%s 目录不存在，跳过 .env 确认' '%s directory missing, skipping .env check')" "$dir")"
+    echo "$path"
+    return
+  fi
+  ensure_env_file "$sample" "$path" "$label"
+  echo "$path"
 }
 
 test_endpoint() {
@@ -282,33 +444,42 @@ ensure_env_file() {
 }
 
 ensure_backend_env() {
-  local path="$SCRIPT_DIR/apps/backend/.env"
-  local sample="$SCRIPT_DIR/apps/backend/.env.sample"
-  if [[ -d "$SCRIPT_DIR/apps/backend" ]]; then
-    ensure_env_file "$sample" "$path" "backend .env"
-  fi
-  echo "$path"
+  ensure_app_env "backend" "backend .env"
 }
 
 ensure_frontend_env() {
-  local path="$SCRIPT_DIR/apps/frontend/.env"
-  local sample="$SCRIPT_DIR/apps/frontend/.env.sample"
-  if [[ -d "$SCRIPT_DIR/apps/frontend" ]]; then
-    ensure_env_file "$sample" "$path" "frontend .env"
-  fi
-  echo "$path"
+  ensure_app_env "frontend" "frontend .env"
 }
 
 set_env_entry() {
   local file="$1"
   local key="$2"
   local value="$3"
+  if [[ -z "${file:-}" ]]; then
+    error_exit "$(loc 'set_env_entry 缺少文件路径' 'set_env_entry missing target file path')"
+  fi
+  if [[ -z "${key:-}" ]]; then
+    error_exit "$(loc 'set_env_entry 缺少键名' 'set_env_entry missing key name')"
+  fi
+  if [[ ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+    error_exit "$(printf "$(loc '非法的环境变量键名：%s' 'Invalid environment variable key: %s')" "$key")"
+  fi
   local py
   if ! py="$(find_python)"; then
     error_exit "$(loc '未检测到 Python 3，请先安装' 'Python 3 not found. Please install Python 3.')"
   fi
-  remove_bom "$file"
-  "$py" - "$file" "$key" "$value" <<'PY'
+  local normalized
+  if ! normalized="$(PY_CMD="$py" resolve_repo_path "$file")"; then
+    local resolve_status=$?
+    if (( resolve_status == 2 )); then
+      error_exit "$(printf "$(loc '拒绝访问仓库外部路径：%s' 'Refusing to touch path outside repository: %s')" "$file")"
+    else
+      error_exit "$(printf "$(loc '无法解析路径：%s' 'Unable to resolve target path: %s')" "$file")"
+    fi
+  fi
+  mkdir -p "$(dirname "$normalized")"
+  remove_bom "$normalized"
+  if ! "$py" - "$normalized" "$key" "$value" <<'PY'
 import sys
 from pathlib import Path
 
@@ -316,23 +487,38 @@ path = Path(sys.argv[1])
 key = sys.argv[2]
 value = sys.argv[3]
 
-if not path.exists():
-    path.touch()
+try:
+    if not path.exists():
+        path.touch()
 
-text = path.read_text(encoding="utf-8") if path.stat().st_size else ""
-lines = text.splitlines()
-safe_value = value.replace('"', '""')
-formatted = f'{key}="{safe_value}"'
+    text = path.read_text(encoding="utf-8") if path.stat().st_size else ""
+    lines = text.splitlines()
 
-for idx, line in enumerate(lines):
-    if line.strip().startswith(f"{key}="):
-        lines[idx] = formatted
-        break
-else:
-    lines.append(formatted)
+    def escape_env_value(raw: str) -> str:
+        """Escape characters that are unsafe for .env double quoted values."""
+        return (
+            raw.replace("\\", "\\\\")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace('"', '\\"')
+        )
 
-path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+    formatted = f'{key}="{escape_env_value(value)}"'
+
+    for idx, line in enumerate(lines):
+        if line.strip().startswith(f"{key}="):
+            lines[idx] = formatted
+            break
+    else:
+        lines.append(formatted)
+
+    path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+except Exception as exc:  # noqa: BLE001
+    raise SystemExit(f"failed to update env entry: {exc}")
 PY
+  then
+    error_exit "$(printf "$(loc '写入键 %s 到 %s 失败' 'Failed to write key %s into %s')" "$key" "$normalized")"
+  fi
 }
 
 install_dependencies() {
@@ -348,10 +534,15 @@ install_dependencies() {
     error_exit "$(loc '未检测到 Node.js，请先安装 Node.js v18+' 'Node.js not found. Please install Node.js v18+ first.')"
   fi
   local node_version
-  node_version="$(node --version)"
-  local node_major="${node_version#v}"
-  node_major="${node_major%%.*}"
-  if [[ -z "$node_major" ]] || (( node_major < 18 )); then
+  node_version="$(node --version 2>/dev/null || node -v 2>/dev/null)"
+  local node_major=""
+  if [[ "$node_version" =~ ([0-9]+) ]]; then
+    node_major="${BASH_REMATCH[1]}"
+  fi
+  if [[ -z "$node_major" ]]; then
+    error_exit "$(printf "$(loc '无法解析 Node.js 版本号：%s' 'Unable to parse Node.js version: %s')" "$node_version")"
+  fi
+  if (( node_major < 18 )); then
     error_exit "$(printf "$(loc 'Node.js 版本 %s 过低，需要 v18+' 'Node.js version %s is too old. v18+ required.')" "$node_version")"
   fi
   success "$(printf "$(loc 'Node.js %s 检测通过' 'Node.js %s detected')" "$node_version")"
@@ -377,8 +568,9 @@ install_dependencies() {
 
   ensure_env_file "$SCRIPT_DIR/.env.example" "$SCRIPT_DIR/.env" "root .env"
 
-  info "$(loc '安装仓库级 npm 依赖...' 'Installing workspace npm dependencies...')"
-  NPM_CONFIG_REGISTRY="$NPM_REGISTRY" npm install
+  if ! NPM_CONFIG_REGISTRY="$NPM_REGISTRY" run_with_progress "安装仓库级 npm 依赖..." "Installing workspace npm dependencies..." npm install; then
+    error_exit "$(loc 'npm install 失败，请检查网络或 npm 日志' 'npm install failed. Please inspect your network settings or npm logs.')"
+  fi
   success "$(loc 'npm install 完成' 'npm install completed')"
 
   if [[ -d "$SCRIPT_DIR/apps/backend" ]]; then
@@ -386,12 +578,14 @@ install_dependencies() {
     (
       cd "$SCRIPT_DIR/apps/backend"
       if [[ ! -d ".venv" ]]; then
-        info "$(loc '创建 Python 虚拟环境（uv venv）...' 'Creating Python virtual environment (uv venv)...')"
-        UV_INDEX_URL="$UV_INDEX" uv venv
+        if ! UV_INDEX_URL="$UV_INDEX" run_with_progress "创建 Python 虚拟环境（uv venv）..." "Creating Python virtual environment (uv venv)..." uv venv; then
+          error_exit "$(loc 'uv venv 执行失败，请检查 uv 输出日志' 'uv venv failed. Please review uv output logs.')"
+        fi
         success "$(loc 'uv venv 完成' 'uv venv completed')"
       fi
-      info "$(printf "$(loc '同步后端依赖（uv sync，PyPI 源 %s）...' 'Syncing backend dependencies (uv sync, index %s)...')" "$PIP_INDEX")"
-      UV_INDEX_URL="$UV_INDEX" uv sync
+      if ! UV_INDEX_URL="$UV_INDEX" run_with_progress "$(printf "同步后端依赖（uv sync，PyPI 源 %s）..." "$PIP_INDEX")" "$(printf "Syncing backend dependencies (uv sync, index %s)..." "$PIP_INDEX")" uv sync; then
+        error_exit "$(loc 'uv sync 执行失败，请检查 uv 输出日志' 'uv sync failed. Please review uv output logs.')"
+      fi
       success "$(loc 'uv sync 完成' 'uv sync completed')"
     )
   fi
@@ -400,8 +594,9 @@ install_dependencies() {
     ensure_env_file "$SCRIPT_DIR/apps/frontend/.env.sample" "$SCRIPT_DIR/apps/frontend/.env" "frontend .env"
     (
       cd "$SCRIPT_DIR/apps/frontend"
-      info "$(loc '安装前端依赖（npm install）...' 'Installing frontend dependencies (npm install)...')"
-      NPM_CONFIG_REGISTRY="$NPM_REGISTRY" npm install
+      if ! NPM_CONFIG_REGISTRY="$NPM_REGISTRY" run_with_progress "安装前端依赖（npm install）..." "Installing frontend dependencies (npm install)..." npm install; then
+        error_exit "$(loc '前端依赖安装失败，请查看 npm 输出日志' 'Frontend npm install failed. Please inspect npm output logs.')"
+      fi
       success "$(loc '前端依赖安装完成' 'Frontend dependencies installed')"
     )
   fi
@@ -444,6 +639,9 @@ check_repository_updates() {
 
 start_dev_servers() {
   ensure_env_file "$SCRIPT_DIR/.env.example" "$SCRIPT_DIR/.env" "root .env"
+  acquire_dev_lock
+  trap '[[ -n "$tmp_pid_file" && -f "$tmp_pid_file" ]] && rm -f "$tmp_pid_file"; release_dev_lock' RETURN
+  local tmp_pid_file=""
 
   if [[ -f "$DEV_PID_FILE" ]]; then
     local existing_pid
@@ -457,18 +655,46 @@ start_dev_servers() {
     fi
   fi
 
+  if [[ -f "$DEV_LOG_FILE" ]]; then
+    local log_size
+    log_size="$(wc -c <"$DEV_LOG_FILE" 2>/dev/null || echo 0)"
+    if [[ -n "$log_size" ]] && (( log_size > 5242880 )); then
+      local rotated="$DEV_LOG_FILE.$(date +%Y%m%d%H%M%S)"
+      mv "$DEV_LOG_FILE" "$rotated"
+      info "$(printf "$(loc '日志已轮换为 %s' 'Rotated dev log to %s')" "$rotated")"
+    fi
+  fi
   : > "$DEV_LOG_FILE"
+
+  tmp_pid_file="$DEV_PID_FILE.tmp$$"
   (
     cd "$SCRIPT_DIR"
-    nohup npm run dev >>"$DEV_LOG_FILE" 2>&1 &
-    echo $! >"$DEV_PID_FILE"
+    if command_exists "setsid"; then
+      nohup setsid npm run dev >>"$DEV_LOG_FILE" 2>&1 &
+    else
+      nohup npm run dev >>"$DEV_LOG_FILE" 2>&1 &
+    fi
+    local dev_pid=$!
+    disown "$dev_pid" 2>/dev/null || true
+    printf '%s\n' "$dev_pid" >"$tmp_pid_file"
   )
-  sleep 1
+
+  if [[ ! -f "$tmp_pid_file" ]]; then
+    warn "$(loc '未能写入 PID 文件，请检查 npm run dev 输出' 'Failed to write PID file. Check npm run dev output')"
+    return
+  fi
+
+  mv "$tmp_pid_file" "$DEV_PID_FILE"
+  tmp_pid_file=""
   local pid
   pid="$(<"$DEV_PID_FILE")"
   if [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1; then
-    success "$(printf "$(loc '已在后台启动开发服务器 (PID %s)' 'Started dev servers in background (PID %s)')" "$pid")"
     info "$(printf "$(loc '日志输出保存至 %s' 'Logs written to %s')" "$DEV_LOG_FILE")"
+    if wait_for_ports 60 3000 8000; then
+      success "$(printf "$(loc '已在后台启动开发服务器 (PID %s)' 'Started dev servers in background (PID %s)')" "$pid")"
+    else
+      warn "$(printf "$(loc 'PID %s 已启动，但未检测到预期端口开放，请检查日志' 'Process %s started, but expected ports did not open in time. Check the log.')" "$pid")"
+    fi
   else
     rm -f "$DEV_PID_FILE"
     warn "$(loc '启动开发服务器失败，请检查 npm run dev 输出' 'Failed to start dev servers. Check npm run dev output')"
@@ -476,6 +702,9 @@ start_dev_servers() {
 }
 
 stop_dev_servers() {
+  acquire_dev_lock
+  trap 'release_dev_lock' RETURN
+
   if [[ ! -f "$DEV_PID_FILE" ]]; then
     info "$(loc '未记录正在运行的开发服务器' 'No recorded dev server to stop')"
     return
@@ -495,11 +724,25 @@ stop_dev_servers() {
     return
   fi
 
-  if kill "$pid" >/dev/null 2>&1; then
-    success "$(printf "$(loc '已停止开发服务器 (PID %s)' 'Stopped dev servers (PID %s)')" "$pid")"
-  else
+  if ! kill "$pid" >/dev/null 2>&1; then
     warn "$(printf "$(loc '停止开发服务器时出现问题：%s' 'Failed to stop dev servers: %s')" "PID $pid")"
+    return
   fi
+
+  local waited=0
+  local timeout=10
+  while kill -0 "$pid" >/dev/null 2>&1 && (( waited < timeout )); do
+    sleep 1
+    ((waited++))
+  done
+
+  if kill -0 "$pid" >/dev/null 2>&1; then
+    warn "$(printf "$(loc '进程 %s 未按时退出，发送 SIGKILL' 'Process %s did not exit in time. Sending SIGKILL.')" "$pid")"
+    kill -9 "$pid" >/dev/null 2>&1 || true
+  else
+    success "$(printf "$(loc '已停止开发服务器 (PID %s)' 'Stopped dev servers (PID %s)')" "$pid")"
+  fi
+
   rm -f "$DEV_PID_FILE"
 }
 
