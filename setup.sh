@@ -188,8 +188,9 @@ import sys
 port = int(sys.argv[1])
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
     sock.settimeout(1)
-    if sock.connect_ex(("127.0.0.1", port)) != 0:
-        raise SystemExit(1)
+    if sock.connect_ex(("127.0.0.1", port)) == 0:
+        raise SystemExit(0)
+raise SystemExit(1)
 PY
       then
         all_up=0
