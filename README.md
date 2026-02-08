@@ -4,7 +4,9 @@
 
 # Resume Matcher 中文增强版
 
-本仓库在上游开源项目 [srbhr/resume-matcher](https://github.com/srbhr/resume-matcher) 基础上，对中文用户体验进行了全面优化，同时保留与原项目一致的部署与扩展方式。
+本仓库在上游开源项目 [resume-matcher](https://github.com/srbhr/resume-matcher) 基础上，对中文用户体验进行了全面优化，同时保留与原项目一致的部署与扩展方式。
+
+上游项目[resume-matcher](https://github.com/srbhr/resume-matcher)已支持多语言，故本项目停更。
 
 </div>
 
